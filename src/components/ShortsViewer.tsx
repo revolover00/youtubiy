@@ -9,7 +9,6 @@ import {
   Music2,
   Volume2,
   VolumeX,
-  Loader2,
 } from "lucide-react";
 import { getStreams } from "../lib/api";
 import { fmtViews, videoIdFromUrl } from "../lib/format";
@@ -140,7 +139,7 @@ function ShortItem({
   return (
     <div className="h-full snap-start flex items-center justify-center py-1">
       <div className="relative h-full max-h-[calc(100vh-8rem)] aspect-[9/16] max-w-full rounded-xl overflow-hidden bg-yt-raised">
-        {active ? (
+        {active && !failed ? (
           <YouTubePlayer
             videoId={id}
             autoplay

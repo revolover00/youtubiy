@@ -1,5 +1,3 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { HAS_SUPABASE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import type { HistoryRow, Subscription, VideoMeta } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -63,35 +61,14 @@ export function setLiked(ids: string[]) {
 /* Subscriptions + history: Supabase when configured, else local       */
 /* ------------------------------------------------------------------ */
 
-const sb: SupabaseClient | null = HAS_SUPABASE
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
-
-export const USING_SUPABASE = HAS_SUPABASE;
-const uid = getUserId();
+const sb: null = null;
+export const USING_SUPABASE = false;
 
 export async function getSubscriptions(): Promise<Subscription[]> {
-  if (sb) {
-    const { data, error } = await sb
-      .from("subscriptions")
-      .select("channel_id, channel_name, channel_avatar_url, added_at")
-      .eq("user_id", uid)
-      .order("added_at", { ascending: false });
-    if (!error && data) return data as Subscription[];
-  }
   return read<Subscription[]>("yt.subs", []);
 }
 
 export async function subscribe(sub: Subscription): Promise<void> {
-  if (sb) {
-    await sb.from("subscriptions").insert({
-      user_id: uid,
-      channel_id: sub.channel_id,
-      channel_name: sub.channel_name,
-      channel_avatar_url: sub.channel_avatar_url ?? null,
-      added_at: new Date().toISOString(),
-    });
-  }
   const list = read<Subscription[]>("yt.subs", []);
   if (!list.some((s) => s.channel_id === sub.channel_id)) {
     list.unshift({ ...sub, added_at: new Date().toISOString() });
@@ -100,9 +77,6 @@ export async function subscribe(sub: Subscription): Promise<void> {
 }
 
 export async function unsubscribe(channelId: string): Promise<void> {
-  if (sb) {
-    await sb.from("subscriptions").delete().eq("user_id", uid).eq("channel_id", channelId);
-  }
   write(
     "yt.subs",
     read<Subscription[]>("yt.subs", []).filter((s) => s.channel_id !== channelId)
@@ -110,36 +84,15 @@ export async function unsubscribe(channelId: string): Promise<void> {
 }
 
 export async function getHistory(): Promise<HistoryRow[]> {
-  if (sb) {
-    const { data, error } = await sb
-      .from("watch_history")
-      .select("video_id, channel_id, category, watched_at")
-      .eq("user_id", uid)
-      .order("watched_at", { ascending: false })
-      .limit(200);
-    if (!error && data) return data as HistoryRow[];
-  }
   return read<HistoryRow[]>("yt.history", []);
 }
 
 export async function addHistory(row: HistoryRow): Promise<void> {
-  if (sb) {
-    await sb.from("watch_history").insert({
-      user_id: uid,
-      video_id: row.video_id,
-      channel_id: row.channel_id ?? null,
-      category: row.category ?? null,
-      watched_at: row.watched_at,
-    });
-  }
   const list = read<HistoryRow[]>("yt.history", []);
   const next = [row, ...list.filter((h) => h.video_id !== row.video_id)].slice(0, 200);
   write("yt.history", next);
 }
 
 export async function clearHistory(): Promise<void> {
-  if (sb) {
-    await sb.from("watch_history").delete().eq("user_id", uid);
-  }
   write("yt.history", []);
 }
