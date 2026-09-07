@@ -16,6 +16,7 @@ import { fmtViews, videoIdFromUrl } from "../lib/format";
 import { addHistory, setMeta } from "../lib/store";
 import type { PipedVideo } from "../lib/types";
 import { Avatar } from "./Feed";
+import YouTubePlayer from "./YouTubePlayer";
 import { ShortsIcon } from "./icons";
 
 interface Props {
@@ -113,40 +114,22 @@ function ShortItem({
   notify: (m: string) => void;
 }) {
   const id = videoIdFromUrl(video.url);
-  const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (!active) {
-      ref.current?.pause();
-      return;
-    }
-    ref.current?.play().catch(() => {});
-  }, [active, src]);
-
-  useEffect(() => {
-    let alive = true;
-    setSrc(null);
-    setFailed(false);
     if (!active) return;
+    let alive = true;
+    addHistory({ video_id: id, watched_at: new Date().toISOString() });
     getStreams(id)
       .then((d) => {
         if (!alive) return;
-        const combined = (d.videoStreams || [])
-          .filter((s) => !s.videoOnly && s.mimeType?.startsWith("video/"))
-          .sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-        const url = combined[0]?.url || d.hls || null;
-        if (url) {
-          setSrc(url);
-          setMeta(id, {
-            title: d.title,
-            thumbnail: video.thumbnail,
-            uploaderName: d.uploader,
-            uploaderAvatar: d.uploaderAvatar,
-            duration: video.duration,
-          });
-        } else setFailed(true);
+        setMeta(id, {
+          title: d.title,
+          thumbnail: video.thumbnail,
+          uploaderName: d.uploader,
+          uploaderAvatar: d.uploaderAvatar,
+          duration: video.duration,
+        });
       })
       .catch(() => alive && setFailed(true));
     return () => {
@@ -157,28 +140,17 @@ function ShortItem({
   return (
     <div className="h-full snap-start flex items-center justify-center py-1">
       <div className="relative h-full max-h-[calc(100vh-8rem)] aspect-[9/16] max-w-full rounded-xl overflow-hidden bg-yt-raised">
-        {src ? (
-          <video
-            ref={ref}
-            src={src}
-            poster={video.thumbnail}
+        {active ? (
+          <YouTubePlayer
+            videoId={id}
+            autoplay
             muted={muted}
             loop
-            playsInline
-            className="w-full h-full object-cover"
-            onPlay={() => addHistory({ video_id: id, watched_at: new Date().toISOString() })}
+            className="w-full h-full"
+            title={video.title}
           />
-        ) : failed ? (
-          <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" />
         ) : (
-          <>
-            <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" />
-            {active && (
-              <span className="absolute inset-0 grid place-items-center bg-black/40">
-                <Loader2 className="w-8 h-8 text-white animate-spin" />
-              </span>
-            )}
-          </>
+          <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" />
         )}
         <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-none" />
 

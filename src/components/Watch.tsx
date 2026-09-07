@@ -15,6 +15,7 @@ import { channelIdFromUrl, fmtDuration, fmtViews, timeAgoAr, videoIdFromUrl } fr
 import { addHistory, setMeta } from "../lib/store";
 import type { PipedVideo, StreamData } from "../lib/types";
 import { Avatar, ErrorState } from "./Feed";
+import YouTubePlayer from "./YouTubePlayer";
 
 interface Props {
   video: PipedVideo;
@@ -71,15 +72,6 @@ export default function Watch({
     };
   }, [id, attempt, video.thumbnail, video.duration]);
 
-  // Combined audio+video streams, highest quality first — native <video>, no HLS lib.
-  const src = useMemo(() => {
-    if (!data) return null;
-    const combined = (data.videoStreams || [])
-      .filter((s) => !s.videoOnly && s.mimeType?.startsWith("video/"))
-      .sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-    return combined[0]?.url || data.hls || null;
-  }, [data]);
-
   const related = useMemo(() => {
     const list = (data?.relatedStreams || []).filter((r) => r.url?.includes("/watch"));
     if (relFilter === "من القناة") {
@@ -107,7 +99,7 @@ export default function Watch({
   if (error) {
     return (
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-6">
-        <ErrorState onRetry={() => setAttempt((a) => a + 1)} message="تعذّر جلب بيانات البث من جميع خوادم Piped." />
+        <ErrorState onRetry={() => setAttempt((a) => a + 1)} message="تعذّر جلب بيانات هذا الفيديو، حاول مرة أخرى." />
       </div>
     );
   }
@@ -130,20 +122,8 @@ export default function Watch({
     <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col lg:flex-row gap-6">
       <div className="flex-1 min-w-0">
         {/* native ad-free player */}
-        <div className="aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black">
-          {src ? (
-            <video
-              key={id}
-              src={src}
-              poster={video.thumbnail}
-              controls
-              onPlay={onPlay}
-              className="w-full h-full"
-              playsInline
-            />
-          ) : (
-            <div className="w-full h-full grid place-items-center text-yt-sub text-sm">لا يتوفر بث قابل للتشغيل لهذا الفيديو</div>
-          )}
+        <div className="aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black" onClick={onPlay}>
+          <YouTubePlayer videoId={id} autoplay title={data.title} />
         </div>
 
         <h1 className="font-display font-bold text-lg sm:text-xl mt-3 leading-snug">{data.title}</h1>
@@ -227,7 +207,7 @@ export default function Watch({
           )}
         </div>
 
-        {/* real comments from Piped */}
+        {/* comments */}
         <section className="mt-6">
           <h2 className="font-display font-bold text-lg">
             {(data.comments?.length || 0) > 0 ? `${data.comments!.length} تعليق` : "التعليقات"}
@@ -256,7 +236,7 @@ export default function Watch({
         </section>
       </div>
 
-      {/* related from Piped */}
+      {/* related */}
       <aside className="lg:w-[400px] xl:w-[420px] shrink-0">
         <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
           {(["الكل", "من القناة", "قصيرة"] as const).map((t) => (
