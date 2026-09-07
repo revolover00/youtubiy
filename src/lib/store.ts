@@ -58,10 +58,9 @@ export function setLiked(ids: string[]) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Subscriptions + history: Supabase when configured, else local       */
+/* Subscriptions + history: stored on-device                          */
 /* ------------------------------------------------------------------ */
 
-const sb: null = null;
 export const USING_SUPABASE = false;
 
 export async function getSubscriptions(): Promise<Subscription[]> {
