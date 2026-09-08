@@ -9,12 +9,38 @@
 import { pushDebug } from "./debug";
 import {
   channelFn,
+  searchPageFn,
   searchVideosFn,
   suggestionsFn,
   trendingFn,
+  trendingPageFn,
   videoDetailsFn,
 } from "./youtube.functions";
 import type { ChannelData, PipedVideo, StreamData } from "./types";
+
+/** A page of feed items plus an opaque cursor for the next one. */
+export interface FeedPage {
+  items: PipedVideo[];
+  next: unknown | null;
+}
+
+/** First/next page of search results (pass the previous `next`). */
+export async function searchPaged(q: string, next: unknown = null): Promise<FeedPage> {
+  const r = await run(`بحث · ${q}${next ? " · المزيد" : ""}`, () =>
+    searchPageFn({ data: { q, continuation: (next as string | null) ?? null } }),
+  );
+  return { items: r.items, next: r.continuation };
+}
+
+/** First/next page of the hot feed. */
+export async function trendingPaged(next: unknown = null): Promise<FeedPage> {
+  const cursors = next as (string | null)[] | null;
+  const r = await run(`الرائج${next ? " · المزيد" : ""}`, () =>
+    trendingPageFn({ data: cursors ? { cursors } : {} }),
+  );
+  const exhausted = r.cursors.every((c) => !c);
+  return { items: r.items, next: exhausted ? null : r.cursors };
+}
 
 const preview = (v: unknown) => {
   const s = JSON.stringify(v, null, 1) ?? "";
