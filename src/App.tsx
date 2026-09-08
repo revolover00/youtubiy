@@ -402,6 +402,18 @@ export default function App() {
                     <VideoCard key={v.url} {...cardProps(v, i + 4)} />
                   ))}
                 </div>
+                {/* infinite-scroll sentinel */}
+                <div ref={loadMoreRef} className="h-24 flex items-center justify-center text-yt-sub">
+                  {loadingMore ? (
+                    <Loader2 className="w-7 h-7 animate-spin" />
+                  ) : hasMore ? (
+                    <button onClick={() => void loadMore()} className="h-9 px-5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium">
+                      عرض المزيد
+                    </button>
+                  ) : (
+                    <span className="text-xs">وصلت إلى نهاية النتائج</span>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -462,8 +474,6 @@ export default function App() {
 
       {shorts && <ShortsViewer items={shorts.items} startIndex={shorts.index} onClose={() => setShorts(null)} notify={notify} />}
 
-      {/* temporary API debug inspector — remove when done */}
-      <DebugPanel />
 
       {toast && (
         <div className="toast-in fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-[#f1f1f1] text-[#0f0f0f] text-sm font-medium px-4 py-3 rounded-lg shadow-2xl shadow-black/50 max-w-[90vw] truncate">
