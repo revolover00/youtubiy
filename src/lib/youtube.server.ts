@@ -178,24 +178,47 @@ const SEARCH_VIDEOS = "EgIQAQ%3D%3D";
 /** filter=videos + sort by view count + uploaded this week */
 const SEARCH_HOT = "CAMSBQgDEAE%3D";
 
+export interface Page {
+  items: PipedVideo[];
+  /** Token for the next page, or null when exhausted. */
+  continuation: string | null;
+}
+
+function continuationToken(payload: Json): string | null {
+  const tokens = collect(payload, "continuationCommand")
+    .map((c: Json) => c?.token)
+    .filter((t: unknown): t is string => typeof t === "string");
+  return tokens.at(-1) ?? null;
+}
+
 export async function search(query: string, params = SEARCH_VIDEOS): Promise<PipedVideo[]> {
-  const data = await innertube("search", { query, params });
-  return extractVideos(data);
+  return (await searchPage(query, params)).items;
+}
+
+/** One page of search results; pass `continuation` to get the next page. */
+export async function searchPage(
+  query: string,
+  params: string = SEARCH_VIDEOS,
+  continuation?: string | null,
+): Promise<Page> {
+  const data = await innertube(
+    "search",
+    continuation ? { continuation } : { query, params },
+  );
+  return { items: extractVideos(data), continuation: continuationToken(data) };
 }
 
 const TRENDING_QUERIES = ["مصر", "الأكثر مشاهدة", "trailer", "music"];
 
-/**
- * YouTube retired the public "trending" browse feed for anonymous clients, so
- * the hot list is rebuilt from most-viewed uploads of the last week.
- */
-export async function trending(): Promise<PipedVideo[]> {
-  const batches = await Promise.allSettled(
-    TRENDING_QUERIES.map((q) => search(q, SEARCH_HOT)),
-  );
+export interface TrendingPage {
+  items: PipedVideo[];
+  /** One continuation per source query (null = exhausted). */
+  cursors: (string | null)[];
+}
+
+function interleave(lists: PipedVideo[][]): PipedVideo[] {
   const merged: PipedVideo[] = [];
   const seen = new Set<string>();
-  const lists = batches.flatMap((b) => (b.status === "fulfilled" ? [b.value] : []));
   const depth = Math.max(0, ...lists.map((l) => l.length));
   for (let i = 0; i < depth; i++) {
     for (const list of lists) {
@@ -205,8 +228,34 @@ export async function trending(): Promise<PipedVideo[]> {
       merged.push(v);
     }
   }
-  if (!merged.length) throw new Error("trending unavailable");
   return merged;
+}
+
+/**
+ * YouTube retired the public "trending" browse feed for anonymous clients, so
+ * the hot list is rebuilt from most-viewed uploads of the last week.
+ * `cursors` (from a previous page) fetches the next page of every source.
+ */
+export async function trendingPage(cursors?: (string | null)[]): Promise<TrendingPage> {
+  const batches = await Promise.allSettled(
+    TRENDING_QUERIES.map((q, i) => {
+      if (cursors) {
+        const c = cursors[i];
+        return c ? searchPage(q, SEARCH_HOT, c) : Promise.resolve<Page>({ items: [], continuation: null });
+      }
+      return searchPage(q, SEARCH_HOT);
+    }),
+  );
+  const pages = batches.map((b) =>
+    b.status === "fulfilled" ? b.value : ({ items: [], continuation: null } as Page),
+  );
+  const items = interleave(pages.map((p) => p.items));
+  if (!items.length && !cursors) throw new Error("trending unavailable");
+  return { items, cursors: pages.map((p) => p.continuation) };
+}
+
+export async function trending(): Promise<PipedVideo[]> {
+  return (await trendingPage()).items;
 }
 
 export async function suggest(query: string): Promise<string[]> {
