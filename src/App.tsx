@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Home, Plus, ListVideo, Video as VideoLucide, Radio, PenLine, X, UserRound } from "lucide-react";
+import { Home, Plus, ListVideo, Video as VideoLucide, Radio, PenLine, X, UserRound, Loader2 } from "lucide-react";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import Watch from "./components/Watch";
 import ShortsViewer from "./components/ShortsViewer";
 import ChannelPage from "./components/ChannelPage";
 import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
-import DebugPanel from "./components/DebugPanel";
 import { ChipsBar, VideoCard, ShortsShelf, EmptyState, SkeletonGrid, ErrorState } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
 import { buildHomeFeed } from "./lib/recommend";
-import { searchVideos, getTrending } from "./lib/api";
+import { searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import { channelIdFromUrl, videoIdFromUrl } from "./lib/format";
 import {
@@ -70,6 +69,12 @@ export default function App() {
   const [feed, setFeed] = useState<PipedVideo[] | null>(null);
   const [feedErr, setFeedErr] = useState(false);
   const [feedAttempt, setFeedAttempt] = useState(0);
+  // pagination: opaque cursor for the next page (null = no more)
+  const feedNext = useRef<unknown | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const feedGen = useRef(0);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -87,33 +92,93 @@ export default function App() {
 
   // feed loading: personalized / topic / search
   const isFeedMode = route.type === "home" || route.type === "subs";
+  const feedQuery = searchQ.trim()
+    ? searchQ.trim()
+    : chip === "الكل" || chip === "الرائج"
+      ? ""
+      : TOPIC_QUERY[chip] || chip;
+  const feedKind: "home" | "trending" | "search" = searchQ.trim()
+    ? "search"
+    : chip === "الكل"
+      ? "home"
+      : chip === "الرائج"
+        ? "trending"
+        : "search";
+
   useEffect(() => {
     if (!isFeedMode) return;
-    let alive = true;
+    const gen = ++feedGen.current;
     setFeed(null);
     setFeedErr(false);
+    setHasMore(false);
+    feedNext.current = null;
 
     (async () => {
       try {
-        if (searchQ.trim()) {
-          setFeed(await searchVideos(searchQ));
-        } else if (chip === "الكل") {
+        let items: PipedVideo[];
+        let next: unknown | null;
+        if (feedKind === "home") {
           const r = await buildHomeFeed(subs, history);
-          if (alive) setFeed(r.videos);
-          return;
-        } else if (chip === "الرائج") {
-          setFeed(await getTrending());
+          items = r.videos;
+          next = r.next;
+        } else if (feedKind === "trending") {
+          const r = await trendingPaged();
+          items = r.items;
+          next = r.next;
         } else {
-          setFeed(await searchVideos(TOPIC_QUERY[chip] || chip));
+          const r = await searchPaged(feedQuery);
+          items = r.items;
+          next = r.next;
         }
+        if (gen !== feedGen.current) return;
+        setFeed(items);
+        feedNext.current = next;
+        setHasMore(!!next);
       } catch {
-        if (alive) setFeedErr(true);
+        if (gen === feedGen.current) setFeedErr(true);
       }
     })();
-    return () => {
-      alive = false;
-    };
-  }, [isFeedMode, chip, searchQ, subs, history, feedAttempt]);
+    // subs/history intentionally excluded: they only refine the home ranking
+    // and re-running on every watch would reset the user's scroll position.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFeedMode, feedKind, feedQuery, feedAttempt]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !feedNext.current) return;
+    const gen = feedGen.current;
+    setLoadingMore(true);
+    try {
+      const r =
+        feedKind === "search"
+          ? await searchPaged(feedQuery, feedNext.current)
+          : await trendingPaged(feedNext.current);
+      if (gen !== feedGen.current) return;
+      setFeed((f) => {
+        const have = new Set((f || []).map((v) => v.url));
+        return [...(f || []), ...r.items.filter((v) => !have.has(v.url))];
+      });
+      feedNext.current = r.next;
+      setHasMore(!!r.next && r.items.length > 0);
+    } catch {
+      if (gen === feedGen.current) setHasMore(false);
+    } finally {
+      if (gen === feedGen.current) setLoadingMore(false);
+    }
+  }, [feedKind, feedQuery, loadingMore]);
+
+  // infinite scroll: fetch the next page when the sentinel becomes visible
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !hasMore || !isFeedMode) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "900px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, isFeedMode, loadMore, feed]);
 
   const toggleLater = (id: string) => {
     setWatchLaterState((w) => {
