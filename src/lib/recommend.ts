@@ -1,4 +1,4 @@
-import { getChannel, getStreams, getTrending } from "./api";
+import { getChannel, getStreams, trendingPaged } from "./api";
 import { ageDays, channelIdFromUrl, videoIdFromUrl } from "./format";
 import type { HistoryRow, PipedVideo, Subscription } from "./types";
 
@@ -16,17 +16,20 @@ const recencyWeight = (days: number) => Math.max(0, 1 - days / 14);
 export interface FeedResult {
   videos: PipedVideo[];
   coldStart: boolean;
+  /** Cursor for loading more (trending pages) when the user scrolls down. */
+  next: unknown | null;
 }
 
 export async function buildHomeFeed(
   subs: Subscription[],
   history: HistoryRow[]
 ): Promise<FeedResult> {
-  const trending = await getTrending(); // filler + cold start source
+  const page = await trendingPaged(); // filler + cold start source
+  const trending = page.items;
 
   // Cold start: not enough signal yet → trending alone.
   if (history.length < 10) {
-    return { videos: trending.slice(0, 24), coldStart: true };
+    return { videos: trending, coldStart: true, next: page.next };
   }
 
   const pool = new Map<string, PipedVideo>();
@@ -96,5 +99,5 @@ export async function buildHomeFeed(
     }
   }
 
-  return { videos: top, coldStart: false };
+  return { videos: top, coldStart: false, next: page.next };
 }
