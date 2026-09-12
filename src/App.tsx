@@ -216,11 +216,14 @@ export default function App() {
     setRoute({ type: "home" });
     setSearchQ("");
     setActiveNav("الرئيسية");
+    if (pathname !== "/") void navigate({ to: "/" });
     window.scrollTo({ top: 0 });
   };
 
   const openVideo = (v: PipedVideo) => {
+    const id = videoIdFromUrl(v.url);
     setRoute({ type: "watch", video: v });
+    if (id && id !== urlVideoId) void navigate({ to: "/watch", search: { v: id } });
     window.scrollTo({ top: 0 });
   };
 
