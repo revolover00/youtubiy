@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Home, Plus, ListVideo, Video as VideoLucide, Radio, PenLine, X, UserRound, Loader2 } from "lucide-react";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
@@ -9,7 +10,7 @@ import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
 import { ChipsBar, VideoCard, ShortsShelf, EmptyState, SkeletonGrid, ErrorState } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
 import { buildHomeFeed } from "./lib/recommend";
-import { searchPaged, trendingPaged } from "./lib/api";
+import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import { channelIdFromUrl, videoIdFromUrl } from "./lib/format";
 import {
@@ -47,6 +48,11 @@ const LIBRARY_KEYS: LibraryKey[] = [
 ];
 
 export default function App() {
+  const routerNav = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const urlSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
+  const urlVideoId = pathname === "/watch" ? String(urlSearch?.["v"] ?? "") : "";
+
   const [route, setRoute] = useState<Route>({ type: "home" });
   const [expanded, setExpanded] = useState(true);
   const [drawer, setDrawer] = useState(false);
@@ -215,13 +221,61 @@ export default function App() {
     setRoute({ type: "home" });
     setSearchQ("");
     setActiveNav("الرئيسية");
+    if (pathname !== "/") void routerNav({ to: "/" });
     window.scrollTo({ top: 0 });
   };
 
   const openVideo = (v: PipedVideo) => {
+    const id = videoIdFromUrl(v.url);
     setRoute({ type: "watch", video: v });
+    if (id && id !== urlVideoId) void routerNav({ to: "/watch", search: { v: id } });
     window.scrollTo({ top: 0 });
   };
+
+  // keep the in-app view in sync with the address bar (deep links, back/forward)
+  useEffect(() => {
+    if (!urlVideoId) {
+      setRoute((r) => (r.type === "watch" ? { type: "home" } : r));
+      return;
+    }
+    let alive = true;
+    setRoute((r) => {
+      if (r.type === "watch" && videoIdFromUrl(r.video.url) === urlVideoId) return r;
+      return {
+        type: "watch",
+        video: {
+          url: `/watch?v=${urlVideoId}`,
+          title: "",
+          thumbnail: `https://i.ytimg.com/vi/${urlVideoId}/hqdefault.jpg`,
+          uploaderName: "",
+          duration: 0,
+        },
+      };
+    });
+    // fill in the real metadata for links opened directly
+    getStreams(urlVideoId)
+      .then((d) => {
+        if (!alive) return;
+        setRoute((r) => {
+          if (r.type !== "watch" || videoIdFromUrl(r.video.url) !== urlVideoId || r.video.title) return r;
+          return {
+            type: "watch",
+            video: {
+              ...r.video,
+              title: d.title,
+              uploaderName: d.uploader,
+              uploaderUrl: d.uploaderUrl,
+              uploaderAvatar: d.uploaderAvatar,
+              views: d.views,
+            },
+          };
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [urlVideoId]);
 
   const openChannel = (raw: string) => {
     const id = channelIdFromUrl(raw) || raw;
@@ -309,7 +363,13 @@ export default function App() {
         onSearch={(q) => {
           setSearchQ(q);
           setRoute({ type: "home" });
+          if (pathname !== "/") void routerNav({ to: "/" });
           window.scrollTo({ top: 0 });
+        }}
+        onLiveSearch={(q) => {
+          if (inWatch) return;
+          setSearchQ(q);
+          setRoute({ type: "home" });
         }}
       />
 
