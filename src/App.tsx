@@ -363,7 +363,13 @@ export default function App() {
         onSearch={(q) => {
           setSearchQ(q);
           setRoute({ type: "home" });
+          if (pathname !== "/") void navigate({ to: "/" });
           window.scrollTo({ top: 0 });
+        }}
+        onLiveSearch={(q) => {
+          if (inWatch) return;
+          setSearchQ(q);
+          setRoute({ type: "home" });
         }}
       />
 
