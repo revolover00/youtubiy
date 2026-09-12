@@ -26,6 +26,8 @@ interface Props {
   inWatch: boolean;
   onBack: () => void;
   onSearch: (q: string) => void;
+  /** fired while typing (debounced) so results update live */
+  onLiveSearch?: (q: string) => void;
 }
 
 interface Notif {
@@ -33,12 +35,13 @@ interface Notif {
   channel: string;
 }
 
-export default function Header({ onToggleSidebar, onHome, inWatch, onBack, onSearch }: Props) {
+export default function Header({ onToggleSidebar, onHome, inWatch, onBack, onSearch, onLiveSearch }: Props) {
   const [query, setQuery] = useState("");
   const [mobileSearch, setMobileSearch] = useState(false);
   const [popover, setPopover] = useState<"create" | "bell" | null>(null);
   const [focused, setFocused] = useState(false);
   const [sugg, setSugg] = useState<string[]>([]);
+  const [active, setActive] = useState(-1);
   const [listening, setListening] = useState(false);
   const [notifs, setNotifs] = useState<Notif[] | null>(null);
   const [notifsErr, setNotifsErr] = useState(false);
@@ -47,16 +50,44 @@ export default function Header({ onToggleSidebar, onHome, inWatch, onBack, onSea
 
   // live search suggestions (debounced)
   useEffect(() => {
-    if (!query.trim()) {
+    const q = query.trim();
+    setActive(-1);
+    if (!q) {
       setSugg([]);
       return;
     }
     if (suggTimer.current) window.clearTimeout(suggTimer.current);
     suggTimer.current = window.setTimeout(async () => {
-      const r = await suggestions(query.trim());
-      setSugg(r.slice(0, 8));
-    }, 250);
+      const r = await suggestions(q);
+      setSugg(r.slice(0, 10));
+    }, 180);
   }, [query]);
+
+  // live results while typing — no need to press Enter
+  useEffect(() => {
+    const q = query.trim();
+    if (!onLiveSearch || q.length < 2) return;
+    const t = window.setTimeout(() => onLiveSearch(q), 450);
+    return () => window.clearTimeout(t);
+  }, [query, onLiveSearch]);
+
+  // arrow keys walk the suggestions and complete the input
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!sugg.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const next = e.key === "ArrowDown"
+        ? (active + 1) % sugg.length
+        : (active <= 0 ? sugg.length : active) - 1;
+      setActive(next);
+      setQuery(sugg[next] ?? query);
+    } else if (e.key === "Tab" && sugg[0]) {
+      e.preventDefault();
+      setQuery(sugg[active >= 0 ? active : 0] ?? query);
+    } else if (e.key === "Escape") {
+      setFocused(false);
+    }
+  };
 
   const submit = (q: string) => {
     const v = q.trim();
@@ -153,6 +184,7 @@ export default function Header({ onToggleSidebar, onHome, inWatch, onBack, onSea
                 onChange={(e) => setQuery(e.target.value)}
                 onFocus={() => { if (blurTimer.current) window.clearTimeout(blurTimer.current); setFocused(true); }}
                 onBlur={() => { blurTimer.current = window.setTimeout(() => setFocused(false), 120); }}
+                onKeyDown={onKeyDown}
                 placeholder="ابحث في يوتيوب"
                 className="flex-1 bg-transparent outline-none text-[15px] placeholder:text-yt-sub"
               />
@@ -172,7 +204,7 @@ export default function Header({ onToggleSidebar, onHome, inWatch, onBack, onSea
                   <button
                     key={i}
                     onMouseDown={(e) => { e.preventDefault(); setQuery(s); submit(s); }}
-                    className="w-full flex items-center gap-4 px-4 py-2 hover:bg-yt-surface text-start"
+                    className={`w-full flex items-center gap-4 px-4 py-2 text-start ${i === active ? "bg-yt-surface" : "hover:bg-yt-surface"}`}
                   >
                     <Search className="w-4 h-4 text-yt-sub shrink-0" />
                     <span className="text-sm truncate">{s}</span>
@@ -281,7 +313,7 @@ export default function Header({ onToggleSidebar, onHome, inWatch, onBack, onSea
             </button>
             <form onSubmit={(e) => { e.preventDefault(); submit(query); }} className="flex flex-1 h-10 my-auto">
               <div className="flex flex-1 items-center h-full rounded-full bg-yt-raised px-4">
-                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث في يوتيوب" className="flex-1 bg-transparent outline-none text-[15px] placeholder:text-yt-sub" />
+                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKeyDown} placeholder="ابحث في يوتيوب" className="flex-1 bg-transparent outline-none text-[15px] placeholder:text-yt-sub" />
                 {query && (
                   <button type="button" onClick={() => setQuery("")} aria-label="مسح"><X className="w-5 h-5 text-yt-sub" /></button>
                 )}
