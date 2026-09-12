@@ -259,8 +259,10 @@ export async function trending(): Promise<PipedVideo[]> {
 }
 
 export async function suggest(query: string): Promise<string[]> {
+  // `oe=utf-8` is required: without it YouTube answers in windows-1256 and
+  // every Arabic suggestion comes back as mojibake.
   const res = await fetch(
-    `https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&hl=ar&q=${encodeURIComponent(query)}`,
+    `https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&hl=ar&gl=eg&oe=utf-8&q=${encodeURIComponent(query)}`,
   );
   if (!res.ok) return [];
   const body = await res.text();
