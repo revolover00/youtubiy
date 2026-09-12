@@ -10,7 +10,7 @@ import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
 import { ChipsBar, VideoCard, ShortsShelf, EmptyState, SkeletonGrid, ErrorState } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
 import { buildHomeFeed } from "./lib/recommend";
-import { searchPaged, trendingPaged } from "./lib/api";
+import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import { channelIdFromUrl, videoIdFromUrl } from "./lib/format";
 import {
