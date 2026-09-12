@@ -33,6 +33,10 @@ export default function YouTubePlayer({
     rel: "0",
     modestbranding: "1",
     hl: "ar",
+    // no annotations / info cards / promoted overlays inside the frame
+    iv_load_policy: "3",
+    disablekb: "0",
+    fs: "1",
   });
   if (loop) {
     params.set("loop", "1");
