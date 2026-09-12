@@ -48,10 +48,10 @@ const LIBRARY_KEYS: LibraryKey[] = [
 ];
 
 export default function App() {
-  const navigate = useNavigate();
+  const routerNav = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const urlSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
-  const urlVideoId = pathname === "/watch" ? String(urlSearch?.v ?? "") : "";
+  const urlVideoId = pathname === "/watch" ? String(urlSearch?.["v"] ?? "") : "";
 
   const [route, setRoute] = useState<Route>({ type: "home" });
   const [expanded, setExpanded] = useState(true);
@@ -221,14 +221,14 @@ export default function App() {
     setRoute({ type: "home" });
     setSearchQ("");
     setActiveNav("الرئيسية");
-    if (pathname !== "/") void navigate({ to: "/" });
+    if (pathname !== "/") void routerNav({ to: "/" });
     window.scrollTo({ top: 0 });
   };
 
   const openVideo = (v: PipedVideo) => {
     const id = videoIdFromUrl(v.url);
     setRoute({ type: "watch", video: v });
-    if (id && id !== urlVideoId) void navigate({ to: "/watch", search: { v: id } });
+    if (id && id !== urlVideoId) void routerNav({ to: "/watch", search: { v: id } });
     window.scrollTo({ top: 0 });
   };
 
@@ -363,7 +363,7 @@ export default function App() {
         onSearch={(q) => {
           setSearchQ(q);
           setRoute({ type: "home" });
-          if (pathname !== "/") void navigate({ to: "/" });
+          if (pathname !== "/") void routerNav({ to: "/" });
           window.scrollTo({ top: 0 });
         }}
         onLiveSearch={(q) => {
