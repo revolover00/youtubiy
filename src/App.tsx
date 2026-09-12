@@ -232,6 +232,51 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
+  // keep the in-app view in sync with the address bar (deep links, back/forward)
+  useEffect(() => {
+    if (!urlVideoId) {
+      setRoute((r) => (r.type === "watch" ? { type: "home" } : r));
+      return;
+    }
+    let alive = true;
+    setRoute((r) => {
+      if (r.type === "watch" && videoIdFromUrl(r.video.url) === urlVideoId) return r;
+      return {
+        type: "watch",
+        video: {
+          url: `/watch?v=${urlVideoId}`,
+          title: "",
+          thumbnail: `https://i.ytimg.com/vi/${urlVideoId}/hqdefault.jpg`,
+          uploaderName: "",
+          duration: 0,
+        },
+      };
+    });
+    // fill in the real metadata for links opened directly
+    getStreams(urlVideoId)
+      .then((d) => {
+        if (!alive) return;
+        setRoute((r) => {
+          if (r.type !== "watch" || videoIdFromUrl(r.video.url) !== urlVideoId || r.video.title) return r;
+          return {
+            type: "watch",
+            video: {
+              ...r.video,
+              title: d.title,
+              uploaderName: d.uploader,
+              uploaderUrl: d.uploaderUrl,
+              uploaderAvatar: d.uploaderAvatar,
+              views: d.views,
+            },
+          };
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [urlVideoId]);
+
   const openChannel = (raw: string) => {
     const id = channelIdFromUrl(raw) || raw;
     if (!id) return;
