@@ -48,6 +48,11 @@ const LIBRARY_KEYS: LibraryKey[] = [
 ];
 
 export default function App() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const urlSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
+  const urlVideoId = pathname === "/watch" ? String(urlSearch?.v ?? "") : "";
+
   const [route, setRoute] = useState<Route>({ type: "home" });
   const [expanded, setExpanded] = useState(true);
   const [drawer, setDrawer] = useState(false);
