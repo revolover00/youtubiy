@@ -282,17 +282,52 @@ export async function search(query: string, params = SEARCH_VIDEOS): Promise<Pip
   return (await searchPage(query, params)).items;
 }
 
-/** One page of search results; pass `continuation` to get the next page. */
+/**
+ * One page of search results; pass `continuation` to get the next page.
+ * With no `params` the results are mixed (videos + channels + playlists),
+ * exactly like youtube.com.
+ */
 export async function searchPage(
   query: string,
-  params: string = SEARCH_VIDEOS,
+  params = "",
   continuation?: string | null,
 ): Promise<Page> {
   const data = await innertube(
     "search",
-    continuation ? { continuation } : { query, params },
+    continuation ? { continuation } : { query, ...(params ? { params } : {}) },
   );
-  return { items: extractVideos(data), continuation: continuationToken(data) };
+  return {
+    items: extractVideos(data),
+    continuation: continuationToken(data),
+    channels: extractChannels(data),
+    playlists: extractPlaylists(data),
+  };
+}
+
+/** All videos of a playlist. */
+export async function playlist(id: string): Promise<PlaylistData> {
+  const browseId = id.startsWith("VL") ? id : `VL${id}`;
+  const data = await innertube("browse", { browseId });
+  const header =
+    collect(data, "playlistHeaderRenderer")[0] ??
+    collect(data, "pageHeaderViewModel")[0] ??
+    {};
+  const meta = collect(data, "microformatDataRenderer")[0] ?? {};
+  const videos = extractVideos(data);
+  const title =
+    text(header.title) || text(collect(header, "dynamicTextViewModel")[0]?.text) || meta.title || "قائمة تشغيل";
+  return {
+    id: browseId.replace(/^VL/, ""),
+    title,
+    thumbnail:
+      https(collect(header, "thumbnails")[0]?.at?.(-1)?.url) ||
+      videos[0]?.thumbnail ||
+      "",
+    videoCount: parseCount(text(header.numVideosText)) || videos.length,
+    uploaderName: text(header.ownerText) || text(collect(header, "ownerText")[0]),
+    description: meta.description ?? text(header.descriptionText),
+    videos,
+  };
 }
 
 const TRENDING_QUERIES = ["مصر", "الأكثر مشاهدة", "trailer", "music"];
