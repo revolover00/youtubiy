@@ -6,7 +6,15 @@
  * to YouTube's own public InnerTube endpoint directly.
  */
 
-import type { ChannelData, PipedComment, PipedVideo, StreamData } from "./types";
+import type {
+  ChannelData,
+  PipedComment,
+  PipedVideo,
+  PlaylistData,
+  SearchChannel,
+  SearchPlaylist,
+  StreamData,
+} from "./types";
 
 const INNERTUBE = "https://www.youtube.com/youtubei/v1";
 
@@ -151,6 +159,88 @@ function fromLockup(r: Json): PipedVideo | null {
   };
 }
 
+const https = (u?: string) => (u ? (u.startsWith("//") ? `https:${u}` : u) : "");
+
+function fromChannelRenderer(r: Json): SearchChannel | null {
+  const id: string | undefined = r?.channelId;
+  const name = text(r?.title);
+  if (!id || !name) return null;
+  const subsLabel = [text(r.videoCountText), text(r.subscriberCountText)].find((s) =>
+    /مشترك|subscrib/i.test(s),
+  );
+  return {
+    id,
+    name,
+    avatar: https(r?.thumbnail?.thumbnails?.at(-1)?.url),
+    subscribers: parseCount(subsLabel ?? text(r.subscriberCountText)),
+    description: text(r.descriptionSnippet),
+    verified: JSON.stringify(r.ownerBadges ?? []).includes("VERIFIED"),
+  };
+}
+
+function fromPlaylistRenderer(r: Json): SearchPlaylist | null {
+  const id: string | undefined = r?.playlistId;
+  const title = text(r?.title);
+  if (!id || !title) return null;
+  const firstVideoId = collect(r, "videoId")[0];
+  return {
+    id,
+    title,
+    thumbnail:
+      https(collect(r, "thumbnails")[0]?.at?.(-1)?.url) ||
+      (firstVideoId ? thumbFor(firstVideoId) : ""),
+    videoCount: parseCount(String(r.videoCount ?? text(r.videoCountText) ?? "")),
+    uploaderName: text(r.longBylineText ?? r.shortBylineText),
+    firstVideoId,
+  };
+}
+
+/** Newer playlist "lockup" cards. */
+function fromPlaylistLockup(r: Json): SearchPlaylist | null {
+  const id: string | undefined = r?.contentId;
+  const meta = r?.metadata?.lockupMetadataViewModel;
+  const title = text(meta?.title);
+  if (!id || !title || r?.contentType !== "LOCKUP_CONTENT_TYPE_PLAYLIST") return null;
+  const rows: Json[] = collect(meta?.metadata, "metadataRows")[0] ?? [];
+  const badge = collect(r.contentImage, "thumbnailOverlayBadgeViewModel")[0];
+  return {
+    id,
+    title,
+    thumbnail: https(collect(r.contentImage, "sources")[0]?.at(-1)?.url),
+    videoCount: parseCount(text(collect(badge, "text")[0]) || ""),
+    uploaderName: text(rows[0]?.metadataParts?.[0]?.text),
+  };
+}
+
+/** Channel cards inside any search response. */
+function extractChannels(payload: Json): SearchChannel[] {
+  const out: SearchChannel[] = [];
+  const seen = new Set<string>();
+  for (const r of collect(payload, "channelRenderer")) {
+    const c = fromChannelRenderer(r);
+    if (c && !seen.has(c.id)) {
+      seen.add(c.id);
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/** Playlist cards inside any search response. */
+function extractPlaylists(payload: Json): SearchPlaylist[] {
+  const out: SearchPlaylist[] = [];
+  const seen = new Set<string>();
+  const push = (p: SearchPlaylist | null) => {
+    if (!p || seen.has(p.id) || !p.thumbnail) return;
+    seen.add(p.id);
+    out.push(p);
+  };
+  for (const r of collect(payload, "playlistRenderer")) push(fromPlaylistRenderer(r));
+  for (const r of collect(payload, "gridPlaylistRenderer")) push(fromPlaylistRenderer(r));
+  for (const r of collect(payload, "lockupViewModel")) push(fromPlaylistLockup(r));
+  return out;
+}
+
 /** Pull every playable video card out of any InnerTube response. */
 function extractVideos(payload: Json): PipedVideo[] {
   const out: PipedVideo[] = [];
@@ -166,6 +256,7 @@ function extractVideos(payload: Json): PipedVideo[] {
   for (const r of collect(payload, "gridVideoRenderer")) push(fromVideoRenderer(r));
   for (const r of collect(payload, "compactVideoRenderer")) push(fromVideoRenderer(r));
   for (const r of collect(payload, "lockupViewModel")) push(fromLockup(r));
+  for (const r of collect(payload, "playlistVideoRenderer")) push(fromVideoRenderer(r));
   return out;
 }
 
@@ -182,6 +273,10 @@ export interface Page {
   items: PipedVideo[];
   /** Token for the next page, or null when exhausted. */
   continuation: string | null;
+  /** Channel cards found on this page (search only). */
+  channels: SearchChannel[];
+  /** Playlist cards found on this page (search only). */
+  playlists: SearchPlaylist[];
 }
 
 function continuationToken(payload: Json): string | null {
@@ -195,17 +290,52 @@ export async function search(query: string, params = SEARCH_VIDEOS): Promise<Pip
   return (await searchPage(query, params)).items;
 }
 
-/** One page of search results; pass `continuation` to get the next page. */
+/**
+ * One page of search results; pass `continuation` to get the next page.
+ * With no `params` the results are mixed (videos + channels + playlists),
+ * exactly like youtube.com.
+ */
 export async function searchPage(
   query: string,
-  params: string = SEARCH_VIDEOS,
+  params = "",
   continuation?: string | null,
 ): Promise<Page> {
   const data = await innertube(
     "search",
-    continuation ? { continuation } : { query, params },
+    continuation ? { continuation } : { query, ...(params ? { params } : {}) },
   );
-  return { items: extractVideos(data), continuation: continuationToken(data) };
+  return {
+    items: extractVideos(data),
+    continuation: continuationToken(data),
+    channels: extractChannels(data),
+    playlists: extractPlaylists(data),
+  };
+}
+
+/** All videos of a playlist. */
+export async function playlist(id: string): Promise<PlaylistData> {
+  const browseId = id.startsWith("VL") ? id : `VL${id}`;
+  const data = await innertube("browse", { browseId });
+  const header =
+    collect(data, "playlistHeaderRenderer")[0] ??
+    collect(data, "pageHeaderViewModel")[0] ??
+    {};
+  const meta = collect(data, "microformatDataRenderer")[0] ?? {};
+  const videos = extractVideos(data);
+  const title =
+    text(header.title) || text(collect(header, "dynamicTextViewModel")[0]?.text) || meta.title || "قائمة تشغيل";
+  return {
+    id: browseId.replace(/^VL/, ""),
+    title,
+    thumbnail:
+      https(collect(header, "thumbnails")[0]?.at?.(-1)?.url) ||
+      videos[0]?.thumbnail ||
+      "",
+    videoCount: parseCount(text(header.numVideosText)) || videos.length,
+    uploaderName: text(header.ownerText) || text(collect(header, "ownerText")[0]),
+    description: meta.description ?? text(header.descriptionText),
+    videos,
+  };
 }
 
 const TRENDING_QUERIES = ["مصر", "الأكثر مشاهدة", "trailer", "music"];
@@ -241,13 +371,15 @@ export async function trendingPage(cursors?: (string | null)[]): Promise<Trendin
     TRENDING_QUERIES.map((q, i) => {
       if (cursors) {
         const c = cursors[i];
-        return c ? searchPage(q, SEARCH_HOT, c) : Promise.resolve<Page>({ items: [], continuation: null });
+        return c ? searchPage(q, SEARCH_HOT, c) : Promise.resolve<Page>({ items: [], continuation: null, channels: [], playlists: [] });
       }
       return searchPage(q, SEARCH_HOT);
     }),
   );
   const pages = batches.map((b) =>
-    b.status === "fulfilled" ? b.value : ({ items: [], continuation: null } as Page),
+    b.status === "fulfilled"
+      ? b.value
+      : ({ items: [], continuation: null, channels: [], playlists: [] } as Page),
   );
   const items = interleave(pages.map((p) => p.items));
   if (!items.length && !cursors) throw new Error("trending unavailable");

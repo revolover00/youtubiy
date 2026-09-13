@@ -80,3 +80,31 @@ export interface VideoMeta {
   uploaderAvatar?: string;
   duration?: number;
 }
+
+export interface SearchChannel {
+  id: string;
+  name: string;
+  avatar: string;
+  subscribers: number;
+  description?: string;
+  verified?: boolean;
+}
+
+export interface SearchPlaylist {
+  id: string;
+  title: string;
+  thumbnail: string;
+  videoCount: number;
+  uploaderName?: string;
+  firstVideoId?: string;
+}
+
+export interface PlaylistData {
+  id: string;
+  title: string;
+  thumbnail: string;
+  videoCount: number;
+  uploaderName: string;
+  description?: string;
+  videos: PipedVideo[];
+}

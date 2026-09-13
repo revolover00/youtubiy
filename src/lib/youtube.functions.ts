@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import type { ChannelData, PipedVideo, StreamData } from "./types";
+import type { ChannelData, PipedVideo, PlaylistData, StreamData } from "./types";
 import type { Page, TrendingPage } from "./youtube.server";
 
 const queryInput = (data: unknown) => z.object({ q: z.string().min(1) }).parse(data);
@@ -52,6 +52,13 @@ export const videoDetailsFn = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<StreamData> => {
     const { videoDetails } = await import("./youtube.server");
     return videoDetails(data.id);
+  });
+
+export const playlistFn = createServerFn({ method: "GET" })
+  .inputValidator((data: unknown) => z.object({ id: z.string().min(2) }).parse(data))
+  .handler(async ({ data }): Promise<PlaylistData> => {
+    const { playlist } = await import("./youtube.server");
+    return playlist(data.id);
   });
 
 export const channelFn = createServerFn({ method: "GET" })

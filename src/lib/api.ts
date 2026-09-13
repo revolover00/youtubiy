@@ -10,18 +10,30 @@ import { pushDebug } from "./debug";
 import {
   channelFn,
   searchPageFn,
+  playlistFn,
   searchVideosFn,
   suggestionsFn,
   trendingFn,
   trendingPageFn,
   videoDetailsFn,
 } from "./youtube.functions";
-import type { ChannelData, PipedVideo, StreamData } from "./types";
+import type {
+  ChannelData,
+  PipedVideo,
+  PlaylistData,
+  SearchChannel,
+  SearchPlaylist,
+  StreamData,
+} from "./types";
 
 /** A page of feed items plus an opaque cursor for the next one. */
 export interface FeedPage {
   items: PipedVideo[];
   next: unknown | null;
+  /** Channel results (search only, first page). */
+  channels?: SearchChannel[];
+  /** Playlist results (search only, first page). */
+  playlists?: SearchPlaylist[];
 }
 
 /** First/next page of search results (pass the previous `next`). */
@@ -29,7 +41,7 @@ export async function searchPaged(q: string, next: unknown = null): Promise<Feed
   const r = await run(`بحث · ${q}${next ? " · المزيد" : ""}`, () =>
     searchPageFn({ data: { q, continuation: (next as string | null) ?? null } }),
   );
-  return { items: r.items, next: r.continuation };
+  return { items: r.items, next: r.continuation, channels: r.channels, playlists: r.playlists };
 }
 
 /** First/next page of the hot feed. */
@@ -82,6 +94,18 @@ export function getStreams(videoId: string): Promise<StreamData> {
     p = run(`فيديو · ${videoId}`, () => videoDetailsFn({ data: { id: videoId } }));
     streamCache.set(videoId, p);
     p.catch(() => streamCache.delete(videoId));
+  }
+  return p;
+}
+
+const playlistCache = new Map<string, Promise<PlaylistData>>();
+
+export function getPlaylist(id: string): Promise<PlaylistData> {
+  let p = playlistCache.get(id);
+  if (!p) {
+    p = run(`قائمة تشغيل · ${id}`, () => playlistFn({ data: { id } }));
+    playlistCache.set(id, p);
+    p.catch(() => playlistCache.delete(id));
   }
   return p;
 }
