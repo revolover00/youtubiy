@@ -54,6 +54,13 @@ export const videoDetailsFn = createServerFn({ method: "GET" })
     return videoDetails(data.id);
   });
 
+export const playlistFn = createServerFn({ method: "GET" })
+  .inputValidator((data: unknown) => z.object({ id: z.string().min(2) }).parse(data))
+  .handler(async ({ data }): Promise<PlaylistData> => {
+    const { playlist } = await import("./youtube.server");
+    return playlist(data.id);
+  });
+
 export const channelFn = createServerFn({ method: "GET" })
   .inputValidator((data: unknown) => z.object({ id: z.string().min(1) }).parse(data))
   .handler(async ({ data }): Promise<ChannelData> => {
