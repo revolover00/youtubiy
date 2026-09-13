@@ -265,6 +265,10 @@ export interface Page {
   items: PipedVideo[];
   /** Token for the next page, or null when exhausted. */
   continuation: string | null;
+  /** Channel cards found on this page (search only). */
+  channels: SearchChannel[];
+  /** Playlist cards found on this page (search only). */
+  playlists: SearchPlaylist[];
 }
 
 function continuationToken(payload: Json): string | null {
