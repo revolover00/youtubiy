@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import type { ChannelData, PipedVideo, StreamData } from "./types";
+import type { ChannelData, PipedVideo, PlaylistData, StreamData } from "./types";
 import type { Page, TrendingPage } from "./youtube.server";
 
 const queryInput = (data: unknown) => z.object({ q: z.string().min(1) }).parse(data);
