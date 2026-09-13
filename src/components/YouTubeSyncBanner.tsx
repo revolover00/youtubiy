@@ -1,12 +1,10 @@
-import { LogIn, Sparkles, Youtube } from "lucide-react";
+import { LogIn, Sparkles, Youtube, RefreshCw } from "lucide-react";
 import { useAuth } from "../lib/AuthContext";
 import { useLanguage } from "../lib/i18n";
 
 export function YouTubeSyncBanner() {
-  const { user, signIn, importingYouTube } = useAuth();
+  const { user, signIn, syncYouTubeData, importingYouTube } = useAuth();
   const { isAr } = useLanguage();
-
-  if (user) return null; // Only show if not logged in
 
   return (
     <div className="mb-6 rounded-2xl overflow-hidden relative group">
@@ -35,28 +33,36 @@ export function YouTubeSyncBanner() {
             {isAr ? "استمتع بمحتواك المفضل فوراً" : "Sync Your YouTube Experience"}
           </h2>
           <p className="text-sm text-yt-sub max-w-md mx-auto sm:mx-0 leading-relaxed font-medium">
-            {isAr
-              ? "سجّل الدخول بحسابك على Google لمزامنة اشتراكاتك تلقائياً وبناء موجز ذكي يعرض لك أفضل المقاطع والقنوات التي تتابعها فعلياً."
-              : "Sign in with Google to automatically sync your subscriptions and generate a smart feed tailored to the channels you actually watch."}
+            {user
+              ? isAr
+                ? "يبدو أنه لم يتم العثور على اشتراكات. يرجى التأكد من تفعيل YouTube Data API v3 ومنح الأذونات اللازمة، ثم حاول المزامنة مرة أخرى."
+                : "It looks like no subscriptions were found. Please make sure YouTube Data API v3 is enabled, then try syncing again."
+              : isAr
+                ? "سجّل الدخول بحسابك على Google لمزامنة اشتراكاتك تلقائياً وبناء موجز ذكي يعرض لك أفضل المقاطع والقنوات التي تتابعها فعلياً."
+                : "Sign in with Google to automatically sync your subscriptions and generate a smart feed tailored to the channels you actually watch."}
           </p>
         </div>
 
         {/* Action button */}
         <div className="shrink-0 w-full sm:w-auto z-10">
           <button
-            onClick={() => signIn().catch(() => {})}
+            onClick={() => (user ? syncYouTubeData().catch(() => {}) : signIn().catch(() => {}))}
             disabled={importingYouTube}
             className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-xl bg-yt-text hover:bg-white text-yt-bg font-bold transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 shadow-xl shadow-white/5"
           >
-            <LogIn className="w-5 h-5 shrink-0" />
+            {user ? <RefreshCw className={`w-5 h-5 shrink-0 ${importingYouTube ? "animate-spin" : ""}`} /> : <LogIn className="w-5 h-5 shrink-0" />}
             <span>
               {importingYouTube
                 ? isAr
-                  ? "جاري המزامنة..."
+                  ? "جاري المزامنة..."
                   : "Syncing..."
-                : isAr
-                  ? "تسجيل الدخول ومزامنة يوتيوب"
-                  : "Sign in & Sync YouTube"}
+                : user
+                  ? isAr
+                    ? "مزامنة البيانات الآن"
+                    : "Sync Data Now"
+                  : isAr
+                    ? "تسجيل الدخول ومزامنة يوتيوب"
+                    : "Sign in & Sync YouTube"}
             </span>
           </button>
         </div>

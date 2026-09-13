@@ -1,14 +1,19 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, type User } from "firebase/auth";
 import { doc, getDocFromServer, getFirestore } from "firebase/firestore";
-import firebaseConfig from "../../firebase-applet-config.json";
 
-const firebaseCfg = firebaseConfig as { firestoreDatabaseId?: string };
+const firebaseConfig = {
+  apiKey: "AIzaSyDQAG0GLQq6KUph_RMLBJFbRNWiMJOIlOk",
+  authDomain: "gen-lang-client-0814697034.firebaseapp.com",
+  projectId: "gen-lang-client-0814697034",
+  storageBucket: "gen-lang-client-0814697034.firebasestorage.app",
+  messagingSenderId: "998894461308",
+  appId: "1:998894461308:web:e19d6cb430ec54480804f9",
+  clientId: "998894461308-raq4v8k54mdcjkdnfjmf29vhvo5u2q73.apps.googleusercontent.com"
+};
+
 export const app = initializeApp(firebaseConfig);
-export const db =
-  firebaseCfg.firestoreDatabaseId && typeof firebaseCfg.firestoreDatabaseId === "string"
-    ? getFirestore(app, firebaseCfg.firestoreDatabaseId)
-    : getFirestore(app);
+export const db = getFirestore(app);
 export const auth = getAuth(app);
 
 export const googleProvider = new GoogleAuthProvider();

@@ -562,6 +562,21 @@ export default function Header({
                     <button
                       onClick={() => {
                         setPopover(null);
+                        syncYouTubeData().catch(() => {});
+                      }}
+                      className="w-full flex items-center gap-3.5 px-4 py-2.5 hover:bg-yt-surface text-sm text-start"
+                    >
+                      <RefreshCw className={`w-5 h-5 text-yt-sub shrink-0 ${importingYouTube ? "animate-spin text-yt-blue" : ""}`} />
+                      <span>
+                        {importingYouTube 
+                          ? (isAr ? "جاري المزامنة..." : "Syncing...") 
+                          : (isAr ? "مزامنة يوتيوب" : "Sync YouTube")}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setPopover(null);
                         onOpenSettings?.();
                       }}
                       className="w-full flex items-center gap-3.5 px-4 py-2.5 hover:bg-yt-surface text-sm text-start"

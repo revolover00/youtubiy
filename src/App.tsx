@@ -712,8 +712,6 @@ export default function App() {
         inWatch={inWatch}
         onBack={inWatch ? minimizeVideo : goHome}
         searchQuery={searchQ}
-        onOpenAIAlgorithm={() => setAiModalOpen(true)}
-        isAIActive={!!aiConfig?.active}
         onSearch={(q) => {
           if (route.type === "watch") {
             const id = videoIdFromUrl(route.video.url);
@@ -837,7 +835,7 @@ export default function App() {
               />
             )}
 
-            {!isSearchActive && route.type === "home" && !user && subs.length === 0 && (
+            {!isSearchActive && route.type === "home" && subs.length === 0 && (
               <YouTubeSyncBanner />
             )}
 
