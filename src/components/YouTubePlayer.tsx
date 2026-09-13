@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface Props {
   videoId: string;
@@ -31,6 +31,8 @@ export default function YouTubePlayer({
   startTime,
   onTimeUpdate,
 }: Props) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
   useEffect(() => {
     if (!onTimeUpdate) return;
     const handleMsg = (e: MessageEvent) => {
@@ -52,6 +54,36 @@ export default function YouTubePlayer({
     return () => window.removeEventListener("message", handleMsg);
   }, [onTimeUpdate]);
 
+  const handleIframeLoad = () => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      // Send the listening event to the iframe to enable infoDelivery messages
+      iframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: "listening", id: 1, channel: "widget" }),
+        "*"
+      );
+    }
+  };
+
+  useEffect(() => {
+    // Keep YouTube playing when tab is hidden or backgrounded
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden" && iframeRef.current?.contentWindow) {
+        // Send a play command to override YouTube's auto-pause on blur
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({
+            event: "command",
+            func: "playVideo",
+            args: []
+          }),
+          "*"
+        );
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
   const params = new URLSearchParams({
     autoplay: autoplay ? "1" : "0",
     mute: muted ? "1" : "0",
@@ -65,10 +97,13 @@ export default function YouTubePlayer({
     disablekb: "0",
     fs: "1",
     enablejsapi: "1",
+    widgetid: "1",
   });
+
   if (startTime && startTime > 0) {
     params.set("start", String(Math.floor(startTime)));
   }
+
   if (loop) {
     params.set("loop", "1");
     params.set("playlist", videoId);
@@ -76,11 +111,13 @@ export default function YouTubePlayer({
 
   return (
     <iframe
-      key={`${videoId}-${autoplay}-${muted}-${startTime ? Math.floor(startTime) : 0}`}
+      ref={iframeRef}
+      key={`${videoId}-${autoplay}-${muted}`}
       className={className}
       src={`https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`}
       title={title}
       loading="lazy"
+      onLoad={handleIframeLoad}
       referrerPolicy="strict-origin-when-cross-origin"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
       allowFullScreen
