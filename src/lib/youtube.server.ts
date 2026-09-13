@@ -248,6 +248,7 @@ function extractVideos(payload: Json): PipedVideo[] {
   for (const r of collect(payload, "gridVideoRenderer")) push(fromVideoRenderer(r));
   for (const r of collect(payload, "compactVideoRenderer")) push(fromVideoRenderer(r));
   for (const r of collect(payload, "lockupViewModel")) push(fromLockup(r));
+  for (const r of collect(payload, "playlistVideoRenderer")) push(fromVideoRenderer(r));
   return out;
 }
 
