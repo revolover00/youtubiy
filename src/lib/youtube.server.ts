@@ -6,7 +6,15 @@
  * to YouTube's own public InnerTube endpoint directly.
  */
 
-import type { ChannelData, PipedComment, PipedVideo, StreamData } from "./types";
+import type {
+  ChannelData,
+  PipedComment,
+  PipedVideo,
+  PlaylistData,
+  SearchChannel,
+  SearchPlaylist,
+  StreamData,
+} from "./types";
 
 const INNERTUBE = "https://www.youtube.com/youtubei/v1";
 
@@ -363,13 +371,15 @@ export async function trendingPage(cursors?: (string | null)[]): Promise<Trendin
     TRENDING_QUERIES.map((q, i) => {
       if (cursors) {
         const c = cursors[i];
-        return c ? searchPage(q, SEARCH_HOT, c) : Promise.resolve<Page>({ items: [], continuation: null });
+        return c ? searchPage(q, SEARCH_HOT, c) : Promise.resolve<Page>({ items: [], continuation: null, channels: [], playlists: [] });
       }
       return searchPage(q, SEARCH_HOT);
     }),
   );
   const pages = batches.map((b) =>
-    b.status === "fulfilled" ? b.value : ({ items: [], continuation: null } as Page),
+    b.status === "fulfilled"
+      ? b.value
+      : ({ items: [], continuation: null, channels: [], playlists: [] } as Page),
   );
   const items = interleave(pages.map((p) => p.items));
   if (!items.length && !cursors) throw new Error("trending unavailable");
