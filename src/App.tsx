@@ -19,6 +19,8 @@ import ShortsViewer from "./components/ShortsViewer";
 import ChannelPage from "./components/ChannelPage";
 import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
 import SettingsDialog from "./components/SettingsDialog";
+import { YouTubeImportModal } from "./components/YouTubeImportModal";
+import { YouTubeSyncBanner } from "./components/YouTubeSyncBanner";
 import {
   ChipsBar,
   VideoCard,
@@ -30,7 +32,7 @@ import {
   PlaylistCard,
 } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
-import { buildHomeFeed } from "./lib/recommend";
+import { buildHomeFeed, buildSubscriptionsFeed } from "./lib/recommend";
 import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import { ageDays, channelIdFromUrl, videoIdFromUrl } from "./lib/format";
@@ -44,7 +46,12 @@ import {
   setWatchLater,
   subscribe,
   unsubscribe,
+  syncWatchLaterToCloud,
+  syncLikedToCloud,
+  fetchUserWatchLater,
+  fetchUserLiked,
 } from "./lib/store";
+import { useAuth } from "./lib/AuthContext";
 import type {
   HistoryRow,
   PipedVideo,
@@ -92,6 +99,7 @@ const LIBRARY_KEYS: LibraryKey[] = [
 
 export default function App() {
   const { lang, t, isAr } = useLanguage();
+  const { user } = useAuth();
   const routerNav = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const urlSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
@@ -126,6 +134,7 @@ export default function App() {
   const [feed, setFeed] = useState<PipedVideo[] | null>(null);
   const [channels, setChannels] = useState<SearchChannel[]>([]);
   const [playlists, setPlaylists] = useState<SearchPlaylist[]>([]);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [feedErr, setFeedErr] = useState(false);
   const [feedAttempt, setFeedAttempt] = useState(0);
   const feedNext = useRef<unknown | null>(null);
@@ -140,7 +149,7 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
 
-  // initial load
+  // initial load and user change sync
   useEffect(() => {
     getSubscriptions()
       .then(setSubs)
@@ -148,9 +157,35 @@ export default function App() {
     getHistory()
       .then(setHistory)
       .catch(() => {});
-    setWatchLaterState(getWatchLater());
-    setLikedState(getLiked());
-  }, []);
+    fetchUserWatchLater()
+      .then(setWatchLaterState)
+      .catch(() => setWatchLaterState(getWatchLater()));
+    fetchUserLiked()
+      .then(setLikedState)
+      .catch(() => setLikedState(getLiked()));
+  }, [user]);
+
+  // Listen for YouTube sync completion events
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      getSubscriptions()
+        .then(setSubs)
+        .catch(() => {});
+      fetchUserLiked()
+        .then(setLikedState)
+        .catch(() => {});
+      if (detail?.importedSubsCount && detail.importedSubsCount > 0) {
+        notify(
+          isAr
+            ? `تم استيراد ${detail.importedSubsCount} قناة من اشتراكاتك على يوتيوب بنجاح!`
+            : `Successfully imported ${detail.importedSubsCount} channels from YouTube!`,
+        );
+      }
+    };
+    window.addEventListener("yt:subscriptions-synced", handleSync);
+    return () => window.removeEventListener("yt:subscriptions-synced", handleSync);
+  }, [isAr, notify]);
 
   // feed loading: personalized / topic / search
   const isFeedMode = route.type === "home" || route.type === "subs";
@@ -186,7 +221,10 @@ export default function App() {
         let chans: SearchChannel[] = [];
         let plays: SearchPlaylist[] = [];
         let next: unknown | null;
-        if (feedKind === "home") {
+        if (route.type === "subs") {
+          items = await buildSubscriptionsFeed(subs);
+          next = null;
+        } else if (feedKind === "home") {
           const r = await buildHomeFeed(subs, history);
           items = r.videos;
           next = r.next;
@@ -205,6 +243,7 @@ export default function App() {
         setFeed(items);
         setChannels(chans);
         setPlaylists(plays);
+
         feedNext.current = next;
         setHasMore(!!next);
       } catch {
@@ -256,7 +295,7 @@ export default function App() {
       const has = w.includes(id);
       const next = has ? w.filter((x) => x !== id) : [...w, id];
       setWatchLater(next);
-      if (user) void saveUserWatchLater(user.uid, next);
+      void syncWatchLaterToCloud(id, !has);
       notify(has ? t("removeFromWatchLater") : t("saveToWatchLater"));
       return next;
     });
@@ -264,8 +303,10 @@ export default function App() {
 
   const toggleLike = (id: string) => {
     setLikedState((l) => {
-      const next = l.includes(id) ? l.filter((x) => x !== id) : [...l, id];
+      const has = l.includes(id);
+      const next = has ? l.filter((x) => x !== id) : [...l, id];
       setLiked(next);
+      void syncLikedToCloud(id, !has);
       return next;
     });
   };
@@ -671,6 +712,8 @@ export default function App() {
         inWatch={inWatch}
         onBack={inWatch ? minimizeVideo : goHome}
         searchQuery={searchQ}
+        onOpenAIAlgorithm={() => setAiModalOpen(true)}
+        isAIActive={!!aiConfig?.active}
         onSearch={(q) => {
           if (route.type === "watch") {
             const id = videoIdFromUrl(route.video.url);
@@ -794,10 +837,38 @@ export default function App() {
               />
             )}
 
+            {!isSearchActive && route.type === "home" && !user && subs.length === 0 && (
+              <YouTubeSyncBanner />
+            )}
+
             {feedErr ? (
               <ErrorState onRetry={() => setFeedAttempt((a) => a + 1)} />
             ) : feed === null ? (
               <SkeletonGrid />
+            ) : route.type === "subs" && subs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 px-4 text-center max-w-md mx-auto">
+                <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 mb-4">
+                  <SubscriptionsIcon className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-bold mb-1 text-yt-text">
+                  {isAr ? "لا توجد قنوات في اشتراكاتك بعد" : "No subscribed channels yet"}
+                </h3>
+                <p className="text-xs text-yt-sub mb-6 leading-relaxed">
+                  {isAr
+                    ? "يمكنك استيراد قنواتك المفضلة من YouTube فوراً عبر ملف Google Takeout CSV أو لصق الروابط لتحديث خلاصتك هنا بكل سهولة."
+                    : "Import your favorite channels from YouTube via Google Takeout CSV or paste links to populate your feed here."}
+                </p>
+                <button
+                  onClick={() => setImportModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-semibold transition-all shadow-lg shadow-red-600/20"
+                >
+                  <span>
+                    {isAr
+                      ? "استيراد اشتراكات YouTube (Google Takeout)"
+                      : "Import YouTube Subscriptions"}
+                  </span>
+                </button>
+              </div>
             ) : filteredVideos.length === 0 &&
               (!showChannelsInSearch || channels.length === 0) &&
               (!showPlaylistsInSearch || playlists.length === 0) ? (
@@ -1016,6 +1087,18 @@ export default function App() {
           <span>{toast}</span>
         </div>
       )}
+
+      {/* Subscriptions Import Modal */}
+      <YouTubeImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImportSuccess={() => {
+          getSubscriptions()
+            .then(setSubs)
+            .catch(() => {});
+          setFeedAttempt((a) => a + 1);
+        }}
+      />
     </div>
   );
 }

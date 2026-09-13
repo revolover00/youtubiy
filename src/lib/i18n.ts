@@ -301,9 +301,11 @@ export function setLanguage(lang: Language): void {
 }
 
 export function useLanguage() {
-  const [lang, setLangState] = useState<Language>(() => getLanguage());
+  const [lang, setLangState] = useState<Language>("en");
 
   useEffect(() => {
+    setLangState(getLanguage());
+
     const handleLangChange = (e: Event) => {
       const custom = e as CustomEvent<Language>;
       if (custom.detail) {

@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId == userId &&
+        data.userId is string && data.userId.size() <= 128 &&
+        data.email is string && data.email.size() <= 256 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidSubscription(data, channelId) {
+      return data.channelId == channelId &&
+        data.channelId is string && data.channelId.size() <= 128 &&
+        data.channelTitle is string && data.channelTitle.size() <= 256 &&
+        (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 1024)) &&
+        (!('subscriberCount' in data) || (data.subscriberCount is string && data.subscriberCount.size() <= 64)) &&
+        data.addedAt is string && data.addedAt.size() <= 64;
+    }
+
+    function isValidHistoryItem(data, videoId) {
+      return data.videoId == videoId &&
+        data.videoId is string && data.videoId.size() <= 128 &&
+        data.title is string && data.title.size() <= 512 &&
+        (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('duration' in data) || data.duration is number) &&
+        data.watchedAt is string && data.watchedAt.size() <= 64;
+    }
+
+    function isValidLikedVideo(data, videoId) {
+      return data.videoId == videoId &&
+        data.videoId is string && data.videoId.size() <= 128 &&
+        data.title is string && data.title.size() <= 512 &&
+        (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('duration' in data) || data.duration is number) &&
+        data.addedAt is string && data.addedAt.size() <= 64;
+    }
+
+    function isValidWatchLaterItem(data, videoId) {
+      return data.videoId == videoId &&
+        data.videoId is string && data.videoId.size() <= 128 &&
+        data.title is string && data.title.size() <= 512 &&
+        (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('duration' in data) || data.duration is number) &&
+        data.addedAt is string && data.addedAt.size() <= 64;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming(), userId);
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming(), userId);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /subscriptions/{channelId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(channelId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(channelId) && isValidSubscription(incoming(), channelId);
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(channelId) && isValidSubscription(incoming(), channelId);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(channelId);
+      }
+
+      match /history/{videoId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidHistoryItem(incoming(), videoId);
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidHistoryItem(incoming(), videoId);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+      }
+
+      match /liked/{videoId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidLikedVideo(incoming(), videoId);
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidLikedVideo(incoming(), videoId);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+      }
+
+      match /watchLater/{videoId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidWatchLaterItem(incoming(), videoId);
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidWatchLaterItem(incoming(), videoId);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+      }
+    }
+  }
+}

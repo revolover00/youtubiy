@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile data stored at /users/{userId}",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user" },
+        "email": { "type": "string", "description": "Email address of the user" },
+        "displayName": { "type": "string", "description": "Display name of the user" },
+        "photoURL": { "type": "string", "description": "Avatar photo URL of the user" },
+        "createdAt": { "type": "string", "description": "Timestamp when the user account was created" },
+        "updatedAt": { "type": "string", "description": "Timestamp when the user account was last updated" }
+      },
+      "required": ["userId", "email", "createdAt", "updatedAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Channel subscription stored at /users/{userId}/subscriptions/{channelId}",
+      "type": "object",
+      "properties": {
+        "channelId": { "type": "string", "description": "The unique ID of the YouTube channel" },
+        "channelTitle": { "type": "string", "description": "The title or name of the YouTube channel" },
+        "avatar": { "type": "string", "description": "Channel avatar URL" },
+        "subscriberCount": { "type": "string", "description": "Subscriber count display string" },
+        "addedAt": { "type": "string", "description": "Timestamp when subscribed" }
+      },
+      "required": ["channelId", "channelTitle", "addedAt"]
+    },
+    "HistoryItem": {
+      "title": "HistoryItem",
+      "description": "Watch history record stored at /users/{userId}/history/{videoId}",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "description": "YouTube video ID" },
+        "title": { "type": "string", "description": "Video title" },
+        "channelTitle": { "type": "string", "description": "Channel or uploader name" },
+        "thumbnail": { "type": "string", "description": "Video thumbnail URL" },
+        "duration": { "type": "number", "description": "Duration in seconds" },
+        "watchedAt": { "type": "string", "description": "Timestamp when watched" }
+      },
+      "required": ["videoId", "title", "watchedAt"]
+    },
+    "LikedVideo": {
+      "title": "LikedVideo",
+      "description": "Liked video record stored at /users/{userId}/liked/{videoId}",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "description": "YouTube video ID" },
+        "title": { "type": "string", "description": "Video title" },
+        "channelTitle": { "type": "string", "description": "Channel or uploader name" },
+        "thumbnail": { "type": "string", "description": "Video thumbnail URL" },
+        "duration": { "type": "number", "description": "Duration in seconds" },
+        "addedAt": { "type": "string", "description": "Timestamp when liked" }
+      },
+      "required": ["videoId", "title", "addedAt"]
+    },
+    "WatchLaterItem": {
+      "title": "WatchLaterItem",
+      "description": "Saved video record stored at /users/{userId}/watchLater/{videoId}",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "description": "YouTube video ID" },
+        "title": { "type": "string", "description": "Video title" },
+        "channelTitle": { "type": "string", "description": "Channel or uploader name" },
+        "thumbnail": { "type": "string", "description": "Video thumbnail URL" },
+        "duration": { "type": "number", "description": "Duration in seconds" },
+        "addedAt": { "type": "string", "description": "Timestamp when added to watch later" }
+      },
+      "required": ["videoId", "title", "addedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Stores user profiles with UID match"
+    },
+    "/users/{userId}/subscriptions/{channelId}": {
+      "schema": "Subscription",
+      "description": "User subscribed channels"
+    },
+    "/users/{userId}/history/{videoId}": {
+      "schema": "HistoryItem",
+      "description": "User watch history"
+    },
+    "/users/{userId}/liked/{videoId}": {
+      "schema": "LikedVideo",
+      "description": "User liked videos"
+    },
+    "/users/{userId}/watchLater/{videoId}": {
+      "schema": "WatchLaterItem",
+      "description": "User watch later queue"
+    }
+  }
+}

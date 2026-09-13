@@ -9,6 +9,7 @@ import {
   RefreshCw,
   AlertTriangle,
   ListVideo,
+  Sparkles,
 } from "lucide-react";
 import { ShortsIcon } from "./icons";
 import { fmtDuration, fmtViews, timeAgo, videoIdFromUrl } from "../lib/format";
@@ -64,12 +65,16 @@ export function ChipsBar({
   active,
   onChange,
   chips,
+  onOpenAIAlgorithm,
+  isAIActive,
 }: {
   active: string;
   onChange: (c: string) => void;
   chips?: (ChipItem | string)[];
+  onOpenAIAlgorithm?: () => void;
+  isAIActive?: boolean;
 }) {
-  const { t } = useLanguage();
+  const { t, isAr } = useLanguage();
 
   const defaultChips: ChipItem[] = [
     { id: "All", label: t("chipAll") },
@@ -89,7 +94,24 @@ export function ChipsBar({
 
   return (
     <div className="sticky top-14 z-40 bg-yt-bg/95 backdrop-blur-sm py-3 -mx-1 px-1">
-      <div className="flex gap-2.5 overflow-x-auto no-scrollbar px-1">
+      <div className="flex gap-2.5 overflow-x-auto no-scrollbar px-1 items-center">
+        {onOpenAIAlgorithm && (
+          <button
+            onClick={onOpenAIAlgorithm}
+            className={`shrink-0 h-8 px-3 rounded-lg text-xs font-bold transition-all duration-200 active:scale-95 whitespace-nowrap flex items-center gap-1.5 shadow-sm ${
+              isAIActive
+                ? "bg-gradient-to-r from-purple-600 to-red-600 hover:from-purple-500 hover:to-red-500 text-white shadow-purple-900/30"
+                : "bg-purple-600/15 text-purple-300 border border-purple-500/30 hover:bg-purple-600/25"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />
+            <span>{isAr ? "خوارزمية الذكاء الاصطناعي" : "AI Algorithm"}</span>
+            {isAIActive && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse shrink-0" />
+            )}
+          </button>
+        )}
+
         {list.map((c) => {
           const isSelected = active === c.id || active === c.label;
           return (

@@ -1,11 +1,11 @@
-import { getChannel, getStreams, trendingPaged } from "./api";
+import { getChannel, getStreams, searchPaged, trendingPaged } from "./api";
 import { ageDays, channelIdFromUrl, videoIdFromUrl } from "./format";
 import type { HistoryRow, PipedVideo, Subscription } from "./types";
 
 /**
- * Home-feed scoring (our own algorithm, not YouTube's):
+ * Home-feed scoring (our own algorithm):
  *
- * score = (subscribed channel ? 3 : 0)
+ * score = (subscribed channel ? 8 : 0)
  *       + (category matches any of last 10 watched ? 2 : 0)
  *       + (appeared in relatedStreams of a recently watched video ? 2 : 0)
  *       + recency_weight(published)   // decays over ~14 days
@@ -27,45 +27,49 @@ export async function buildHomeFeed(
   const page = await trendingPaged(); // filler + cold start source
   const trending = page.items;
 
-  // Cold start: not enough signal yet → trending alone.
-  if (history.length < 10) {
-    return { videos: trending, coldStart: true, next: page.next };
-  }
-
   const pool = new Map<string, PipedVideo>();
   trending.forEach((v) => {
     const id = videoIdFromUrl(v.url);
     if (id) pool.set(id, v);
   });
 
-  // 1) Subscriptions feed: latest uploads of each subscribed channel.
   const subbedIds = new Set(subs.map((s) => s.channel_id));
+
+  // 2) Subscriptions feed: latest uploads of each subscribed channel.
   await Promise.allSettled(
-    subs.slice(0, 12).map(async (s) => {
-      const ch = await getChannel(s.channel_id);
-      (ch.relatedStreams || []).forEach((v) => {
-        const id = videoIdFromUrl(v.url);
-        if (id && !pool.has(id)) pool.set(id, v);
-      });
+    subs.slice(0, 20).map(async (s) => {
+      try {
+        const ch = await getChannel(s.channel_id);
+        (ch.relatedStreams || []).forEach((v) => {
+          const id = videoIdFromUrl(v.url);
+          if (id && !pool.has(id)) pool.set(id, v);
+        });
+      } catch {
+        // channel fetch failed, ignore gracefully
+      }
     }),
   );
 
-  // 2) Related streams of the last 5 watched videos.
+  // 3) Related streams of the last 5 watched videos.
   const relatedIds = new Set<string>();
   await Promise.allSettled(
     history.slice(0, 5).map(async (h) => {
-      const st = await getStreams(h.video_id);
-      (st.relatedStreams || []).forEach((v) => {
-        const id = videoIdFromUrl(v.url);
-        if (id) {
-          relatedIds.add(id);
-          if (!pool.has(id)) pool.set(id, v);
-        }
-      });
+      try {
+        const st = await getStreams(h.video_id);
+        (st.relatedStreams || []).forEach((v) => {
+          const id = videoIdFromUrl(v.url);
+          if (id) {
+            relatedIds.add(id);
+            if (!pool.has(id)) pool.set(id, v);
+          }
+        });
+      } catch {
+        // stream fetch failed, ignore gracefully
+      }
     }),
   );
 
-  // 3) Score every candidate.
+  // 4) Score every candidate according to base signals.
   const recentCats = new Set(
     history
       .slice(0, 10)
@@ -77,20 +81,26 @@ export async function buildHomeFeed(
     .map(([id, v]) => {
       const chId = channelIdFromUrl(v.uploaderUrl || "");
       let score = recencyWeight(ageDays(v.uploaded, v.uploadedDate));
-      if (chId && subbedIds.has(chId)) score += 3;
+
+      // Boost subscribed channels
+      if (chId && subbedIds.has(chId)) {
+        score += 6;
+      }
+
       if (v.description && recentCats.has(v.description)) score += 2;
       if (relatedIds.has(id)) score += 2;
+
       return { id, v, score };
     })
     .sort((a, b) => b.score - a.score);
 
-  const top = scored.slice(0, 28).map((s) => s.v);
+  const top = scored.slice(0, 36).map((s) => s.v);
 
-  // Pad with trending if scoring yielded too little.
+  // Pad with trending if scoring yielded too little
   if (top.length < 10) {
     const have = new Set(top.map((t) => videoIdFromUrl(t.url)));
     for (const t of trending) {
-      if (top.length >= 28) break;
+      if (top.length >= 36) break;
       const id = videoIdFromUrl(t.url);
       if (id && !have.has(id)) {
         top.push(t);
@@ -100,4 +110,25 @@ export async function buildHomeFeed(
   }
 
   return { videos: top, coldStart: false, next: page.next };
+}
+
+export async function buildSubscriptionsFeed(subs: Subscription[]): Promise<PipedVideo[]> {
+  if (subs.length === 0) return [];
+  const pool = new Map<string, PipedVideo>();
+  await Promise.allSettled(
+    subs.slice(0, 25).map(async (s) => {
+      try {
+        const ch = await getChannel(s.channel_id);
+        (ch.relatedStreams || []).forEach((v) => {
+          const id = videoIdFromUrl(v.url);
+          if (id && !pool.has(id)) pool.set(id, v);
+        });
+      } catch {
+        // ignore
+      }
+    }),
+  );
+  return Array.from(pool.values()).sort(
+    (a, b) => ageDays(a.uploaded, a.uploadedDate) - ageDays(b.uploaded, b.uploadedDate),
+  );
 }

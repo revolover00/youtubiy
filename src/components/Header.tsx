@@ -16,6 +16,13 @@ import {
   Loader2,
   Settings as SettingsIcon,
   Globe,
+  LogIn,
+  LogOut,
+  Cloud,
+  User as UserIcon,
+  RefreshCw,
+  Youtube,
+  Sparkles,
 } from "lucide-react";
 import { LogoIcon } from "./icons";
 import { suggestions, getChannel } from "../lib/api";
@@ -23,6 +30,8 @@ import { getSubscriptions } from "../lib/store";
 import { fmtDuration } from "../lib/format";
 import type { PipedVideo } from "../lib/types";
 import { useLanguage } from "../lib/i18n";
+import { useAuth } from "../lib/AuthContext";
+import { YouTubeImportModal } from "./YouTubeImportModal";
 
 interface Props {
   onToggleSidebar: () => void;
@@ -52,6 +61,8 @@ export default function Header({
   searchQuery,
 }: Props) {
   const { lang, setLang, t, isAr } = useLanguage();
+  const { user, signIn, signOut, importingYouTube, syncYouTubeData, lastImportResult } = useAuth();
+  const [showImportModal, setShowImportModal] = useState(false);
   const [query, setQuery] = useState(searchQuery || "");
   const [mobileSearch, setMobileSearch] = useState(false);
   const [popover, setPopover] = useState<"create" | "bell" | "account" | null>(null);
@@ -401,30 +412,153 @@ export default function Header({
           </div>
 
           {/* User Account / Settings Menu */}
-          <div className="relative">
+          <div className="relative flex items-center gap-1.5">
+            {!user && (
+              <button
+                onClick={() => signIn().catch(() => {})}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-yt-blue/40 text-yt-blue hover:bg-yt-blue/10 text-xs sm:text-sm font-semibold transition-colors"
+                title={isAr ? "تسجيل الدخول باستخدام Google" : "Sign in with Google"}
+              >
+                <LogIn className="w-4 h-4" />
+                <span>{isAr ? "تسجيل الدخول" : "Sign in"}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setPopover(popover === "account" ? null : "account")}
-              className="w-8 h-8 rounded-full ms-1 grid place-items-center text-sm font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black hover:opacity-90 active:scale-95 transition-transform"
+              className="w-8 h-8 rounded-full ms-1 grid place-items-center text-sm font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black hover:opacity-90 active:scale-95 transition-transform overflow-hidden"
               aria-label={t("account")}
             >
-              {isAr ? "أ" : "U"}
+              {user?.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || "User"}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : user?.displayName ? (
+                user.displayName.charAt(0).toUpperCase()
+              ) : isAr ? (
+                "أ"
+              ) : (
+                "U"
+              )}
             </button>
 
             {popover === "account" && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setPopover(null)} />
-                <div className="dropdown-in absolute end-0 top-12 z-50 w-64 rounded-xl bg-yt-raised border border-yt-border py-2 shadow-2xl shadow-black/70 overflow-hidden text-yt-text">
+                <div className="dropdown-in absolute end-0 top-12 z-50 w-72 rounded-xl bg-yt-raised border border-yt-border py-2 shadow-2xl shadow-black/70 overflow-hidden text-yt-text">
                   <div className="flex items-center gap-3 px-4 py-3 border-b border-yt-border">
-                    <div className="w-10 h-10 rounded-full grid place-items-center font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black shrink-0">
-                      {isAr ? "أ" : "U"}
+                    <div className="w-10 h-10 rounded-full grid place-items-center font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black shrink-0 overflow-hidden">
+                      {user?.photoURL ? (
+                        <img
+                          src={user.photoURL}
+                          alt={user.displayName || "User"}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : user?.displayName ? (
+                        user.displayName.charAt(0).toUpperCase()
+                      ) : isAr ? (
+                        "أ"
+                      ) : (
+                        "U"
+                      )}
                     </div>
-                    <div className="min-w-0">
-                      <p className="font-bold text-sm truncate">User</p>
-                      <p className="text-xs text-yt-sub truncate">user@youtube.local</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm truncate">
+                        {user ? user.displayName || "User" : isAr ? "زائر" : "Guest"}
+                      </p>
+                      <p className="text-xs text-yt-sub truncate">
+                        {user ? user.email : isAr ? "غير مسجل الدخول" : "Not signed in"}
+                      </p>
                     </div>
                   </div>
 
+                  {/* Cloud status banner */}
+                  <div className="px-4 py-2 bg-yt-surface/50 text-xs border-b border-yt-border flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-yt-sub">
+                      <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>{isAr ? "سحابة Firebase" : "Firebase Cloud"}</span>
+                    </div>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      {user ? (isAr ? "متزامن" : "Synced") : isAr ? "جاهز" : "Ready"}
+                    </span>
+                  </div>
+
+                  {/* YouTube Data Sync / Import section */}
+                  <div className="px-4 py-3 bg-red-500/10 border-b border-yt-border">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Youtube className="w-4 h-4 text-red-500 shrink-0" />
+                        <span className="text-xs font-semibold">
+                          {isAr ? "اشتراكات YouTube" : "YouTube Channels"}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-yt-sub">
+                        {lastImportResult
+                          ? isAr
+                            ? `${lastImportResult.importedSubsCount} قناة مستوردة`
+                            : `${lastImportResult.importedSubsCount} imported`
+                          : user
+                            ? isAr
+                              ? "حساب Google متصل"
+                              : "Google connected"
+                            : isAr
+                              ? "جاهز للاستيراد"
+                              : "Ready"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setPopover(null);
+                        setShowImportModal(true);
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white text-xs font-medium transition-all"
+                    >
+                      <Youtube className="w-3.5 h-3.5" />
+                      <span>
+                        {isAr
+                          ? "استيراد اشتراكات يوتيوب (Takeout / CSV)"
+                          : "Import YouTube Subscriptions"}
+                      </span>
+                    </button>
+                  </div>
+
                   <div className="py-1">
+                    {!user ? (
+                      <button
+                        onClick={() => {
+                          setPopover(null);
+                          signIn().catch(() => {});
+                        }}
+                        className="w-full flex items-center gap-3.5 px-4 py-2.5 hover:bg-yt-surface text-sm text-start font-medium text-yt-blue"
+                      >
+                        <LogIn className="w-5 h-5 shrink-0" />
+                        <div className="min-w-0">
+                          <p>{isAr ? "تسجيل الدخول بحساب Google" : "Sign in with Google"}</p>
+                          <p className="text-[11px] text-yt-sub">
+                            {isAr
+                              ? "لحفظ المفضلة والمشاهدات ومزامنة السحابة"
+                              : "Save likes, history & sync cloud"}
+                          </p>
+                        </div>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setPopover(null);
+                          signOut().catch(() => {});
+                        }}
+                        className="w-full flex items-center gap-3.5 px-4 py-2.5 hover:bg-yt-surface text-sm text-start font-medium text-red-400 hover:text-red-300"
+                      >
+                        <LogOut className="w-5 h-5 shrink-0" />
+                        <span>{isAr ? "تسجيل الخروج" : "Sign out"}</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => {
                         setPopover(null);
@@ -544,6 +678,8 @@ export default function Header({
           </button>
         </div>
       )}
+
+      <YouTubeImportModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} />
     </>
   );
 }
