@@ -151,6 +151,88 @@ function fromLockup(r: Json): PipedVideo | null {
   };
 }
 
+const https = (u?: string) => (u ? (u.startsWith("//") ? `https:${u}` : u) : "");
+
+function fromChannelRenderer(r: Json): SearchChannel | null {
+  const id: string | undefined = r?.channelId;
+  const name = text(r?.title);
+  if (!id || !name) return null;
+  const subsLabel = [text(r.videoCountText), text(r.subscriberCountText)].find((s) =>
+    /مشترك|subscrib/i.test(s),
+  );
+  return {
+    id,
+    name,
+    avatar: https(r?.thumbnail?.thumbnails?.at(-1)?.url),
+    subscribers: parseCount(subsLabel ?? text(r.subscriberCountText)),
+    description: text(r.descriptionSnippet),
+    verified: JSON.stringify(r.ownerBadges ?? []).includes("VERIFIED"),
+  };
+}
+
+function fromPlaylistRenderer(r: Json): SearchPlaylist | null {
+  const id: string | undefined = r?.playlistId;
+  const title = text(r?.title);
+  if (!id || !title) return null;
+  const firstVideoId = collect(r, "videoId")[0];
+  return {
+    id,
+    title,
+    thumbnail:
+      https(collect(r, "thumbnails")[0]?.at?.(-1)?.url) ||
+      (firstVideoId ? thumbFor(firstVideoId) : ""),
+    videoCount: parseCount(String(r.videoCount ?? text(r.videoCountText) ?? "")),
+    uploaderName: text(r.longBylineText ?? r.shortBylineText),
+    firstVideoId,
+  };
+}
+
+/** Newer playlist "lockup" cards. */
+function fromPlaylistLockup(r: Json): SearchPlaylist | null {
+  const id: string | undefined = r?.contentId;
+  const meta = r?.metadata?.lockupMetadataViewModel;
+  const title = text(meta?.title);
+  if (!id || !title || r?.contentType !== "LOCKUP_CONTENT_TYPE_PLAYLIST") return null;
+  const rows: Json[] = collect(meta?.metadata, "metadataRows")[0] ?? [];
+  const badge = collect(r.contentImage, "thumbnailOverlayBadgeViewModel")[0];
+  return {
+    id,
+    title,
+    thumbnail: https(collect(r.contentImage, "sources")[0]?.at(-1)?.url),
+    videoCount: parseCount(text(collect(badge, "text")[0]) || ""),
+    uploaderName: text(rows[0]?.metadataParts?.[0]?.text),
+  };
+}
+
+/** Channel cards inside any search response. */
+function extractChannels(payload: Json): SearchChannel[] {
+  const out: SearchChannel[] = [];
+  const seen = new Set<string>();
+  for (const r of collect(payload, "channelRenderer")) {
+    const c = fromChannelRenderer(r);
+    if (c && !seen.has(c.id)) {
+      seen.add(c.id);
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/** Playlist cards inside any search response. */
+function extractPlaylists(payload: Json): SearchPlaylist[] {
+  const out: SearchPlaylist[] = [];
+  const seen = new Set<string>();
+  const push = (p: SearchPlaylist | null) => {
+    if (!p || seen.has(p.id) || !p.thumbnail) return;
+    seen.add(p.id);
+    out.push(p);
+  };
+  for (const r of collect(payload, "playlistRenderer")) push(fromPlaylistRenderer(r));
+  for (const r of collect(payload, "gridPlaylistRenderer")) push(fromPlaylistRenderer(r));
+  for (const r of collect(payload, "lockupViewModel")) push(fromPlaylistLockup(r));
+  return out;
+}
+
 /** Pull every playable video card out of any InnerTube response. */
 function extractVideos(payload: Json): PipedVideo[] {
   const out: PipedVideo[] = [];
