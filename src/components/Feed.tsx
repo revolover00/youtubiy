@@ -251,6 +251,91 @@ export function VideoCard({
   );
 }
 
+export function ChannelResultCard({
+  channel,
+  onOpen,
+  subscribed,
+  onToggleSub,
+}: {
+  channel: SearchChannel;
+  onOpen: (id: string) => void;
+  subscribed: boolean;
+  onToggleSub: () => void;
+}) {
+  return (
+    <article
+      className="rise flex items-center gap-4 sm:gap-6 py-4 border-b border-yt-border cursor-pointer"
+      onClick={() => onOpen(channel.id)}
+    >
+      <div className="w-24 sm:w-40 flex justify-center shrink-0">
+        <Avatar src={channel.avatar} name={channel.name} size="w-20 h-20 sm:w-28 sm:h-28 text-2xl" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <h3 className="text-[16px] sm:text-lg font-medium flex items-center gap-1.5">
+          <span className="truncate">{channel.name}</span>
+          {channel.verified && <BadgeCheck className="w-4 h-4 shrink-0" />}
+        </h3>
+        <p className="text-[13px] text-yt-sub mt-0.5">
+          {channel.subscribers > 0 ? `${fmtViews(channel.subscribers)} مشترك` : "قناة"}
+        </p>
+        {channel.description && (
+          <p className="text-[13px] text-yt-sub mt-1.5 line-clamp-1">{channel.description}</p>
+        )}
+      </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSub();
+        }}
+        className={`h-9 px-4 rounded-full text-sm font-bold shrink-0 active:scale-95 transition-all ${
+          subscribed ? "bg-yt-surface text-yt-text hover:bg-yt-hover" : "bg-yt-text text-yt-bg hover:bg-white/85"
+        }`}
+      >
+        {subscribed ? "مشترك" : "اشتراك"}
+      </button>
+    </article>
+  );
+}
+
+export function PlaylistCard({
+  playlist,
+  onOpen,
+  index = 0,
+}: {
+  playlist: SearchPlaylist;
+  onOpen: (p: SearchPlaylist) => void;
+  index?: number;
+}) {
+  return (
+    <article
+      className="rise group cursor-pointer"
+      style={{ animationDelay: `${Math.min(index, 11) * 50}ms` }}
+      onClick={() => onOpen(playlist)}
+    >
+      <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised">
+        {playlist.thumbnail ? (
+          <img
+            src={playlist.thumbnail}
+            alt={playlist.title}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
+          />
+        ) : (
+          <div className="w-full h-full bg-yt-surface" />
+        )}
+        <div className="absolute inset-y-0 end-0 w-2/5 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-white">
+          <ListVideo className="w-5 h-5 mb-1" />
+          <span className="font-bold text-sm">{playlist.videoCount || ""}</span>
+          <span className="text-[11px]">فيديو</span>
+        </div>
+      </div>
+      <h3 className="text-[15px] font-medium leading-snug line-clamp-2 mt-3">{playlist.title}</h3>
+      <p className="text-[13px] text-yt-sub mt-1">{playlist.uploaderName || "قائمة تشغيل"}</p>
+    </article>
+  );
+}
+
 export function ShortsShelf({ items, onOpen }: { items: PipedVideo[]; onOpen: (i: number) => void }) {
   if (!items.length) return null;
   return (
