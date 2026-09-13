@@ -225,7 +225,7 @@ export default function App() {
           items = await buildSubscriptionsFeed(subs);
           next = null;
         } else if (feedKind === "home") {
-          const r = await buildHomeFeed(subs, history);
+          const r = await buildHomeFeed(subs, history, liked);
           items = r.videos;
           next = r.next;
         } else if (feedKind === "trending") {

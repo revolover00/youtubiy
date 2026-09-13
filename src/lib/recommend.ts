@@ -23,6 +23,7 @@ export interface FeedResult {
 export async function buildHomeFeed(
   subs: Subscription[],
   history: HistoryRow[],
+  likedIds: string[] = [],
 ): Promise<FeedResult> {
   const page = await trendingPaged(); // filler + cold start source
   const trending = page.items;
@@ -50,12 +51,18 @@ export async function buildHomeFeed(
     }),
   );
 
-  // 3) Related streams of the last 5 watched videos.
+  // 3) Related streams of the last 5 watched videos and last 3 liked videos.
   const relatedIds = new Set<string>();
+  
+  const sources = [
+    ...history.slice(0, 5).map(h => h.video_id),
+    ...likedIds.slice(0, 3)
+  ];
+
   await Promise.allSettled(
-    history.slice(0, 5).map(async (h) => {
+    sources.map(async (videoId) => {
       try {
-        const st = await getStreams(h.video_id);
+        const st = await getStreams(videoId);
         (st.relatedStreams || []).forEach((v) => {
           const id = videoIdFromUrl(v.url);
           if (id) {
