@@ -76,10 +76,10 @@ export default function Header({
   const suggTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    if (searchQuery !== undefined && searchQuery !== query) {
+    if (searchQuery !== undefined) {
       setQuery(searchQuery);
     }
-  }, [searchQuery, query]);
+  }, [searchQuery]);
 
   // live search suggestions (debounced)
   useEffect(() => {

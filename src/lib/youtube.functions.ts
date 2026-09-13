@@ -6,14 +6,14 @@ import type { Page, TrendingPage } from "./youtube.server";
 
 const queryInput = (data: unknown) => z.object({ q: z.string().min(1) }).parse(data);
 
-export const searchVideosFn = createServerFn({ method: "GET" })
+export const searchVideosFn = createServerFn({ method: "POST" })
   .inputValidator(queryInput)
   .handler(async ({ data }): Promise<PipedVideo[]> => {
     const { search } = await import("./youtube.server");
     return search(data.q);
   });
 
-export const searchPageFn = createServerFn({ method: "GET" })
+export const searchPageFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) =>
     z.object({ q: z.string().min(1), continuation: z.string().nullable().optional() }).parse(data),
   )
@@ -22,21 +22,21 @@ export const searchPageFn = createServerFn({ method: "GET" })
     return searchPage(data.q, undefined, data.continuation ?? null);
   });
 
-export const suggestionsFn = createServerFn({ method: "GET" })
+export const suggestionsFn = createServerFn({ method: "POST" })
   .inputValidator(queryInput)
   .handler(async ({ data }): Promise<string[]> => {
     const { suggest } = await import("./youtube.server");
     return suggest(data.q);
   });
 
-export const trendingFn = createServerFn({ method: "GET" }).handler(
+export const trendingFn = createServerFn({ method: "POST" }).handler(
   async (): Promise<PipedVideo[]> => {
     const { trending } = await import("./youtube.server");
     return trending();
   },
 );
 
-export const trendingPageFn = createServerFn({ method: "GET" })
+export const trendingPageFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) =>
     z.object({ cursors: z.array(z.string().nullable()).optional() }).parse(data ?? {}),
   )
@@ -45,21 +45,21 @@ export const trendingPageFn = createServerFn({ method: "GET" })
     return trendingPage(data.cursors);
   });
 
-export const videoDetailsFn = createServerFn({ method: "GET" })
+export const videoDetailsFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ id: z.string().min(6) }).parse(data))
   .handler(async ({ data }): Promise<StreamData> => {
     const { videoDetails } = await import("./youtube.server");
     return videoDetails(data.id);
   });
 
-export const playlistFn = createServerFn({ method: "GET" })
+export const playlistFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ id: z.string().min(2) }).parse(data))
   .handler(async ({ data }): Promise<PlaylistData> => {
     const { playlist } = await import("./youtube.server");
     return playlist(data.id);
   });
 
-export const channelFn = createServerFn({ method: "GET" })
+export const channelFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ id: z.string().min(1) }).parse(data))
   .handler(async ({ data }): Promise<ChannelData> => {
     const { channel } = await import("./youtube.server");
