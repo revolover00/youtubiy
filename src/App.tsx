@@ -256,6 +256,7 @@ export default function App() {
       const has = w.includes(id);
       const next = has ? w.filter((x) => x !== id) : [...w, id];
       setWatchLater(next);
+      if (user) void saveUserWatchLater(user.uid, next);
       notify(has ? t("removeFromWatchLater") : t("saveToWatchLater"));
       return next;
     });
