@@ -8,10 +8,11 @@ import {
   ThumbsDown,
   RefreshCw,
   AlertTriangle,
+  ListVideo,
 } from "lucide-react";
 import { CHIPS } from "../lib/config";
 import { fmtDuration, fmtViews, timeAgoAr, videoIdFromUrl } from "../lib/format";
-import type { PipedVideo } from "../lib/types";
+import type { PipedVideo, SearchChannel, SearchPlaylist } from "../lib/types";
 import { ShortsIcon } from "./icons";
 
 export function Avatar({
