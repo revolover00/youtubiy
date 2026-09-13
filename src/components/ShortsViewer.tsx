@@ -62,16 +62,28 @@ export default function ShortsViewer({ items, startIndex, onClose, notify }: Pro
           <span className="font-display font-extrabold text-lg">شورتس</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => setMuted((m) => !m)} className="w-10 h-10 rounded-full hover:bg-white/10 grid place-items-center" aria-label="الصوت">
+          <button
+            onClick={() => setMuted((m) => !m)}
+            className="w-10 h-10 rounded-full hover:bg-white/10 grid place-items-center"
+            aria-label="الصوت"
+          >
             {muted ? <VolumeX className="w-5 h-5 opacity-60" /> : <Volume2 className="w-5 h-5" />}
           </button>
-          <button onClick={onClose} className="w-10 h-10 rounded-full hover:bg-white/10 grid place-items-center" aria-label="إغلاق">
+          <button
+            onClick={onClose}
+            className="w-10 h-10 rounded-full hover:bg-white/10 grid place-items-center"
+            aria-label="إغلاق"
+          >
             <X className="w-6 h-6" />
           </button>
         </div>
       </div>
 
-      <div ref={containerRef} onScroll={onScroll} className="flex-1 overflow-y-auto snap-y snap-mandatory no-scrollbar">
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        className="flex-1 overflow-y-auto snap-y snap-mandatory no-scrollbar"
+      >
         {items.map((s, i) => (
           <ShortItem
             key={s.url}
@@ -90,7 +102,10 @@ export default function ShortsViewer({ items, startIndex, onClose, notify }: Pro
 
       <div className="hidden sm:flex absolute end-3 top-1/2 -translate-y-1/2 flex-col gap-1.5">
         {items.map((_, i) => (
-          <span key={i} className={`w-1.5 rounded-full transition-all duration-300 ${active === i ? "h-5 bg-white" : "h-1.5 bg-white/30"}`} />
+          <span
+            key={i}
+            className={`w-1.5 rounded-full transition-all duration-300 ${active === i ? "h-5 bg-white" : "h-1.5 bg-white/30"}`}
+          />
         ))}
       </div>
     </div>
@@ -118,7 +133,9 @@ function ShortItem({
   useEffect(() => {
     if (!active) return;
     let alive = true;
-    addHistory({ video_id: id, watched_at: new Date().toISOString() });
+    const row = { video_id: id, watched_at: new Date().toISOString() };
+    addHistory(row);
+    window.dispatchEvent(new CustomEvent("yt:history", { detail: row }));
     getStreams(id)
       .then((d) => {
         if (!alive) return;
@@ -173,9 +190,23 @@ function ShortItem({
             onClick={onLike}
             label="إعجاب"
           />
-          <RailBtn icon={<ThumbsDown className="w-6 h-6" />} onClick={() => notify("شكراً لتقييمك")} label="لم يعجبني" />
-          <RailBtn icon={<MessageCircle className="w-6 h-6" />} count="340" onClick={() => notify("التعليقات قريباً")} label="تعليقات" />
-          <RailBtn icon={<Share2 className="w-6 h-6" />} count="مشاركة" onClick={() => notify("تم نسخ الرابط 🔗")} label="مشاركة" />
+          <RailBtn
+            icon={<ThumbsDown className="w-6 h-6" />}
+            onClick={() => notify("شكراً لتقييمك")}
+            label="لم يعجبني"
+          />
+          <RailBtn
+            icon={<MessageCircle className="w-6 h-6" />}
+            count="340"
+            onClick={() => notify("التعليقات قريباً")}
+            label="تعليقات"
+          />
+          <RailBtn
+            icon={<Share2 className="w-6 h-6" />}
+            count="مشاركة"
+            onClick={() => notify("تم نسخ الرابط 🔗")}
+            label="مشاركة"
+          />
           <RailBtn icon={<MoreVertical className="w-6 h-6" />} onClick={() => {}} label="المزيد" />
         </div>
       </div>
@@ -200,7 +231,9 @@ function RailBtn({
     <button onClick={onClick} className="flex flex-col items-center gap-1 group" aria-label={label}>
       <span
         className={`w-12 h-12 rounded-full grid place-items-center transition-all group-active:scale-90 ${
-          active ? "bg-white/20 text-yt-blue" : "bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white"
+          active
+            ? "bg-white/20 text-yt-blue"
+            : "bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white"
         }`}
       >
         {icon}

@@ -78,7 +78,7 @@ export async function subscribe(sub: Subscription): Promise<void> {
 export async function unsubscribe(channelId: string): Promise<void> {
   write(
     "yt.subs",
-    read<Subscription[]>("yt.subs", []).filter((s) => s.channel_id !== channelId)
+    read<Subscription[]>("yt.subs", []).filter((s) => s.channel_id !== channelId),
   );
 }
 

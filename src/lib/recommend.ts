@@ -22,7 +22,7 @@ export interface FeedResult {
 
 export async function buildHomeFeed(
   subs: Subscription[],
-  history: HistoryRow[]
+  history: HistoryRow[],
 ): Promise<FeedResult> {
   const page = await trendingPaged(); // filler + cold start source
   const trending = page.items;
@@ -47,7 +47,7 @@ export async function buildHomeFeed(
         const id = videoIdFromUrl(v.url);
         if (id && !pool.has(id)) pool.set(id, v);
       });
-    })
+    }),
   );
 
   // 2) Related streams of the last 5 watched videos.
@@ -62,7 +62,7 @@ export async function buildHomeFeed(
           if (!pool.has(id)) pool.set(id, v);
         }
       });
-    })
+    }),
   );
 
   // 3) Score every candidate.
@@ -70,7 +70,7 @@ export async function buildHomeFeed(
     history
       .slice(0, 10)
       .map((h) => h.category)
-      .filter(Boolean) as string[]
+      .filter(Boolean) as string[],
   );
 
   const scored = [...pool.entries()]

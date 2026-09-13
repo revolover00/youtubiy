@@ -15,9 +15,7 @@ export const searchVideosFn = createServerFn({ method: "GET" })
 
 export const searchPageFn = createServerFn({ method: "GET" })
   .inputValidator((data: unknown) =>
-    z
-      .object({ q: z.string().min(1), continuation: z.string().nullable().optional() })
-      .parse(data),
+    z.object({ q: z.string().min(1), continuation: z.string().nullable().optional() }).parse(data),
   )
   .handler(async ({ data }): Promise<Page> => {
     const { searchPage } = await import("./youtube.server");

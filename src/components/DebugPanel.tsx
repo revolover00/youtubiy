@@ -94,14 +94,24 @@ export default function DebugPanel() {
 
           {entry ? (
             <>
-              <div className="px-3 py-1.5 text-[11px] font-mono text-yt-sub bg-yt-raised/50 shrink-0 flex items-center gap-3" dir="ltr">
-                <span className={entry.label.includes("فشل") ? "text-red-400 font-bold" : "text-emerald-400 font-bold"}>
+              <div
+                className="px-3 py-1.5 text-[11px] font-mono text-yt-sub bg-yt-raised/50 shrink-0 flex items-center gap-3"
+                dir="ltr"
+              >
+                <span
+                  className={
+                    entry.label.includes("فشل")
+                      ? "text-red-400 font-bold"
+                      : "text-emerald-400 font-bold"
+                  }
+                >
                   {entry.label.includes("فشل") ? "ERR" : "200"}
                 </span>
                 <span className="text-yt-blue">GET</span>
                 <span className="truncate">{entry.path}</span>
                 <span className="ms-auto shrink-0 text-yt-sub/70">
-                  {(entry.body.length / 1024).toFixed(1)} KB · {new Date(entry.at).toLocaleTimeString()}
+                  {(entry.body.length / 1024).toFixed(1)} KB ·{" "}
+                  {new Date(entry.at).toLocaleTimeString()}
                 </span>
               </div>
               <pre

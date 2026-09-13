@@ -16,10 +16,12 @@ import {
   Settings,
   Flag,
   HelpCircle,
+  Globe,
   X,
 } from "lucide-react";
 import { ShortsIcon, SubscriptionsIcon, LogoIcon } from "./icons";
 import type { Subscription } from "../lib/types";
+import { useLanguage } from "../lib/i18n";
 
 interface Props {
   expanded: boolean;
@@ -30,37 +32,8 @@ interface Props {
   onHome: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  onOpenSettings?: () => void;
 }
-
-const MAIN = [
-  { icon: Home, label: "الرئيسية" },
-  { icon: ShortsIcon, label: "Shorts" },
-  { icon: SubscriptionsIcon, label: "الاشتراكات" },
-];
-
-const YOU = [
-  { icon: UserRound, label: "قناتك" },
-  { icon: History, label: "السجل" },
-  { icon: ListVideo, label: "قوائم التشغيل" },
-  { icon: SquarePlay, label: "مقاطع الفيديو" },
-  { icon: Clock, label: "المشاهدة لاحقاً" },
-  { icon: ThumbsUp, label: "مقاطع أعجبتني" },
-  { icon: Download, label: "التنزيلات" },
-];
-
-const EXPLORE = [
-  { icon: Flame, label: "الرائج" },
-  { icon: Music2, label: "الموسيقى" },
-  { icon: Gamepad2, label: "الألعاب" },
-  { icon: Newspaper, label: "الأخبار" },
-  { icon: Trophy, label: "الرياضة" },
-];
-
-const SETTINGS = [
-  { icon: Settings, label: "الإعدادات" },
-  { icon: Flag, label: "الإبلاغ عن مشكلة" },
-  { icon: HelpCircle, label: "المساعدة" },
-];
 
 function Item({
   icon: Icon,
@@ -76,8 +49,8 @@ function Item({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-5 px-3 h-10 rounded-lg text-sm transition-colors ${
-        active ? "bg-yt-surface font-bold" : "hover:bg-yt-surface/70"
+      className={`w-full flex items-center gap-5 px-3 h-10 rounded-lg text-sm transition-colors text-start ${
+        active ? "bg-yt-surface font-bold text-white" : "hover:bg-yt-surface/70 text-yt-text/90"
       }`}
     >
       <Icon className="w-5 h-5 shrink-0" />
@@ -86,19 +59,51 @@ function Item({
   );
 }
 
-function FullContent({ active, subs, onNavigate, onHome }: Pick<Props, "active" | "subs" | "onNavigate" | "onHome">) {
+function FullContent({
+  active,
+  subs,
+  onNavigate,
+  onHome,
+  onOpenSettings,
+}: Pick<Props, "active" | "subs" | "onNavigate" | "onHome" | "onOpenSettings">) {
+  const { t, isAr } = useLanguage();
+
+  const MAIN = [
+    { icon: Home, label: t("home"), id: "home" },
+    { icon: ShortsIcon, label: t("shorts"), id: "shorts" },
+    { icon: SubscriptionsIcon, label: t("subscriptions"), id: "subs" },
+  ];
+
+  const YOU = [
+    { icon: UserRound, label: t("yourChannel"), id: "channel" },
+    { icon: History, label: t("history"), id: "history" },
+    { icon: ListVideo, label: t("playlists"), id: "playlists" },
+    { icon: SquarePlay, label: t("yourVideos"), id: "videos" },
+    { icon: Clock, label: t("watchLater"), id: "watchlater" },
+    { icon: ThumbsUp, label: t("likedVideos"), id: "liked" },
+    { icon: Download, label: t("downloads"), id: "downloads" },
+  ];
+
+  const EXPLORE = [
+    { icon: Flame, label: t("trending"), id: "trending" },
+    { icon: Music2, label: t("music"), id: "music" },
+    { icon: Gamepad2, label: t("gaming"), id: "gaming" },
+    { icon: Newspaper, label: t("news"), id: "news" },
+    { icon: Trophy, label: t("sports"), id: "sports" },
+  ];
+
   return (
     <div className="px-3 pb-8">
       <div className="py-2">
         {MAIN.map((m) => (
           <Item
-            key={m.label}
+            key={m.id}
             icon={m.icon}
             label={m.label}
-            active={active === m.label}
+            active={active === m.label || (m.id === "home" && active === "home")}
             onClick={() => {
-              onNavigate(m.label);
-              if (m.label === "الرئيسية") onHome();
+              if (m.id === "home") onHome();
+              else onNavigate(m.label);
             }}
           />
         ))}
@@ -107,39 +112,56 @@ function FullContent({ active, subs, onNavigate, onHome }: Pick<Props, "active" 
       <hr className="border-yt-border my-2" />
 
       <div className="py-1">
-        <button className="flex items-center gap-1.5 px-3 h-9 text-[15px] font-bold">
-          أنت
+        <button className="flex items-center gap-1.5 px-3 h-9 text-[15px] font-bold text-yt-text">
+          {t("you")}
           <ChevronDown className="w-4 h-4" />
         </button>
         {YOU.map((y) => (
-          <Item key={y.label} icon={y.icon} label={y.label} active={active === y.label} onClick={() => onNavigate(y.label)} />
+          <Item
+            key={y.id}
+            icon={y.icon}
+            label={y.label}
+            active={active === y.label}
+            onClick={() => onNavigate(y.label)}
+          />
         ))}
       </div>
 
       <hr className="border-yt-border my-2" />
 
       <div className="py-1">
-        <h3 className="px-3 h-9 flex items-center text-[15px] font-bold">الاشتراكات</h3>
+        <h3 className="px-3 h-9 flex items-center text-[15px] font-bold text-yt-text">
+          {t("subscriptions")}
+        </h3>
         {subs.length === 0 && (
-          <p className="px-3 py-2 text-[13px] text-yt-sub">اشترك في قنوات لتظهر هنا</p>
+          <p className="px-3 py-2 text-[13px] text-yt-sub">{t("notifsEmpty")}</p>
         )}
         {subs.map((s) => (
           <button
             key={s.channel_id}
             onClick={() => onNavigate(`channel:${s.channel_id}`)}
-            className="w-full flex items-center gap-5 px-3 h-10 rounded-lg text-sm hover:bg-yt-surface/70"
+            className="w-full flex items-center gap-5 px-3 h-10 rounded-lg text-sm hover:bg-yt-surface/70 text-start"
           >
             {s.channel_avatar_url ? (
-              <img src={s.channel_avatar_url} alt={s.channel_name} referrerPolicy="no-referrer" className="w-6 h-6 rounded-full object-cover shrink-0 bg-yt-surface" />
+              <img
+                src={s.channel_avatar_url}
+                alt={s.channel_name}
+                referrerPolicy="no-referrer"
+                className="w-6 h-6 rounded-full object-cover shrink-0 bg-yt-surface"
+              />
             ) : (
               <span
                 className="w-6 h-6 rounded-full grid place-items-center text-[11px] font-bold text-white shrink-0"
-                style={{ background: `hsl(${[...s.channel_name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 42%)` }}
+                style={{
+                  background: `hsl(${
+                    [...s.channel_name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360
+                  } 55% 42%)`,
+                }}
               >
                 {s.channel_name.charAt(0)}
               </span>
             )}
-            <span className="truncate">{s.channel_name}</span>
+            <span className="truncate text-yt-text/90">{s.channel_name}</span>
           </button>
         ))}
       </div>
@@ -147,65 +169,106 @@ function FullContent({ active, subs, onNavigate, onHome }: Pick<Props, "active" 
       <hr className="border-yt-border my-2" />
 
       <div className="py-1">
-        <h3 className="px-3 h-9 flex items-center text-[15px] font-bold">استكشف</h3>
+        <h3 className="px-3 h-9 flex items-center text-[15px] font-bold text-yt-text">
+          {t("explore")}
+        </h3>
         {EXPLORE.map((e) => (
-          <Item key={e.label} icon={e.icon} label={e.label} active={active === e.label} onClick={() => onNavigate(e.label)} />
+          <Item
+            key={e.id}
+            icon={e.icon}
+            label={e.label}
+            active={active === e.label}
+            onClick={() => onNavigate(e.label)}
+          />
         ))}
       </div>
 
       <hr className="border-yt-border my-2" />
 
       <div className="py-1">
-        {SETTINGS.map((s) => (
-          <Item key={s.label} icon={s.icon} label={s.label} onClick={() => onNavigate(s.label)} />
-        ))}
+        <Item icon={Settings} label={t("settings")} onClick={onOpenSettings} />
+        <Item
+          icon={Globe}
+          label={`${t("language")}: ${t("languageName")}`}
+          onClick={onOpenSettings}
+        />
+        <Item icon={Flag} label={t("report")} onClick={() => onNavigate(t("report"))} />
+        <Item icon={HelpCircle} label={t("help")} onClick={() => onNavigate(t("help"))} />
       </div>
 
       <div className="px-3 pt-4 text-xs text-yt-sub leading-relaxed">
-        <p className="font-bold text-[13px] text-yt-text/80 mb-2">نبذة</p>
-        <p>الشروط · الخصوصية · السياسة والأمان</p>
-        <p>كيف يعمل يوتيوب · اختبار الميزات الجديدة</p>
-        <p className="mt-3">© 2026 Google LLC — واجهة تجريبية</p>
+        <p className="font-bold text-[13px] text-yt-text/80 mb-2">{t("about")}</p>
+        <p>{t("terms")}</p>
+        <p>{t("howWorks")}</p>
+        <p className="mt-3">{t("copyright")}</p>
       </div>
     </div>
   );
 }
 
-export default function Sidebar({ expanded, pushable = true, active, subs, onNavigate, onHome, mobileOpen, onCloseMobile }: Props) {
+export default function Sidebar({
+  expanded,
+  pushable = true,
+  active,
+  subs,
+  onNavigate,
+  onHome,
+  mobileOpen,
+  onCloseMobile,
+  onOpenSettings,
+}: Props) {
+  const { t, isAr } = useLanguage();
+
   return (
     <>
       {/* desktop mini */}
       {pushable && !expanded && (
-        <nav className="hidden md:flex fixed top-14 bottom-0 start-0 w-[72px] z-30 bg-yt-bg flex-col items-center pt-1 gap-1">
-          {MAIN.map((m) => (
-            <button
-              key={m.label}
-              onClick={() => {
-                onNavigate(m.label);
-                if (m.label === "الرئيسية") onHome();
-              }}
-              className={`w-16 py-3.5 rounded-xl flex flex-col items-center gap-1.5 text-[10px] transition-colors ${
-                active === m.label ? "bg-yt-surface font-bold" : "hover:bg-yt-surface/70"
-              }`}
-            >
-              <m.icon className="w-6 h-6" />
-              {m.label === "Shorts" ? "شورتس" : m.label}
-            </button>
-          ))}
+        <nav className="hidden md:flex fixed top-14 bottom-0 start-0 w-[72px] z-30 bg-yt-bg flex-col items-center pt-1 gap-1 border-e border-yt-border/40">
           <button
-            onClick={() => onNavigate("قناتك")}
-            className="w-16 py-3.5 rounded-xl flex flex-col items-center gap-1.5 text-[10px] hover:bg-yt-surface/70"
+            onClick={onHome}
+            className={`w-16 py-3.5 rounded-xl flex flex-col items-center gap-1.5 text-[10px] transition-colors ${
+              active === "home" || active === t("home")
+                ? "bg-yt-surface font-bold text-white"
+                : "hover:bg-yt-surface/70 text-yt-sub"
+            }`}
+          >
+            <Home className="w-6 h-6" />
+            <span>{t("home")}</span>
+          </button>
+          <button
+            onClick={() => onNavigate(t("shorts"))}
+            className="w-16 py-3.5 rounded-xl flex flex-col items-center gap-1.5 text-[10px] hover:bg-yt-surface/70 text-yt-sub transition-colors"
+          >
+            <ShortsIcon className="w-6 h-6" />
+            <span>{t("shorts")}</span>
+          </button>
+          <button
+            onClick={() => onNavigate(t("subscriptions"))}
+            className="w-16 py-3.5 rounded-xl flex flex-col items-center gap-1.5 text-[10px] hover:bg-yt-surface/70 text-yt-sub transition-colors"
+          >
+            <SubscriptionsIcon className="w-6 h-6" />
+            <span>{t("subscriptions")}</span>
+          </button>
+          <button
+            onClick={() => onNavigate(t("yourChannel"))}
+            className="w-16 py-3.5 rounded-xl flex flex-col items-center gap-1.5 text-[10px] hover:bg-yt-surface/70 text-yt-sub transition-colors"
           >
             <UserRound className="w-6 h-6" />
-            أنت
+            <span>{t("you")}</span>
           </button>
         </nav>
       )}
 
       {/* desktop full */}
       {pushable && expanded && (
-        <nav className="hidden md:block fixed top-14 bottom-0 start-0 w-60 z-30 bg-yt-bg overflow-y-auto">
-          <FullContent active={active} subs={subs} onNavigate={onNavigate} onHome={onHome} />
+        <nav className="hidden md:block fixed top-14 bottom-0 start-0 w-60 z-30 bg-yt-bg overflow-y-auto border-e border-yt-border/40">
+          <FullContent
+            active={active}
+            subs={subs}
+            onNavigate={onNavigate}
+            onHome={onHome}
+            onOpenSettings={onOpenSettings}
+          />
         </nav>
       )}
 
@@ -217,20 +280,20 @@ export default function Sidebar({ expanded, pushable = true, active, subs, onNav
       >
         <div className="absolute inset-0 bg-black/60" onClick={onCloseMobile} />
         <aside
-          className={`absolute top-0 bottom-0 start-0 w-[280px] max-w-[85vw] bg-yt-bg overflow-y-auto transition-transform duration-250 ease-out ${
-            mobileOpen ? "translate-x-0" : "translate-x-full"
+          className={`absolute top-0 bottom-0 start-0 w-[280px] max-w-[85vw] bg-yt-bg overflow-y-auto transition-transform duration-250 ease-out border-e border-yt-border ${
+            mobileOpen ? "translate-x-0" : isAr ? "translate-x-full" : "-translate-x-full"
           }`}
         >
-          <div className="h-14 flex items-center gap-2 px-4 sticky top-0 bg-yt-bg z-10">
+          <div className="h-14 flex items-center gap-2 px-4 sticky top-0 bg-yt-bg z-10 border-b border-yt-border/30">
             <button
               onClick={onCloseMobile}
               className="w-10 h-10 -ms-2 rounded-full hover:bg-yt-surface grid place-items-center"
-              aria-label="إغلاق"
+              aria-label={t("cancel")}
             >
               <X className="w-5 h-5" />
             </button>
             <LogoIcon className="w-7 h-5" />
-            <span className="font-display font-extrabold text-lg">يوتيوب</span>
+            <span className="font-display font-extrabold text-lg">{t("brandName")}</span>
           </div>
           <FullContent
             active={active}
@@ -241,6 +304,10 @@ export default function Sidebar({ expanded, pushable = true, active, subs, onNav
             }}
             onHome={() => {
               onHome();
+              onCloseMobile();
+            }}
+            onOpenSettings={() => {
+              onOpenSettings?.();
               onCloseMobile();
             }}
           />

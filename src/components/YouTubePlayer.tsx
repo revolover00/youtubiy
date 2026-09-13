@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 interface Props {
   videoId: string;
   /** Start playing as soon as the frame mounts (shorts / active card). */
@@ -7,6 +9,8 @@ interface Props {
   controls?: boolean;
   className?: string;
   title?: string;
+  startTime?: number;
+  onTimeUpdate?: (currentTime: number) => void;
 }
 
 /**
@@ -24,7 +28,30 @@ export default function YouTubePlayer({
   controls = true,
   className = "w-full h-full",
   title = "مشغّل الفيديو",
+  startTime,
+  onTimeUpdate,
 }: Props) {
+  useEffect(() => {
+    if (!onTimeUpdate) return;
+    const handleMsg = (e: MessageEvent) => {
+      try {
+        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+        if (
+          data &&
+          data.event === "infoDelivery" &&
+          data.info &&
+          typeof data.info.currentTime === "number"
+        ) {
+          onTimeUpdate(data.info.currentTime);
+        }
+      } catch {
+        // ignore non-json messages
+      }
+    };
+    window.addEventListener("message", handleMsg);
+    return () => window.removeEventListener("message", handleMsg);
+  }, [onTimeUpdate]);
+
   const params = new URLSearchParams({
     autoplay: autoplay ? "1" : "0",
     mute: muted ? "1" : "0",
@@ -37,7 +64,11 @@ export default function YouTubePlayer({
     iv_load_policy: "3",
     disablekb: "0",
     fs: "1",
+    enablejsapi: "1",
   });
+  if (startTime && startTime > 0) {
+    params.set("start", String(Math.floor(startTime)));
+  }
   if (loop) {
     params.set("loop", "1");
     params.set("playlist", videoId);
@@ -45,7 +76,7 @@ export default function YouTubePlayer({
 
   return (
     <iframe
-      key={`${videoId}-${autoplay}-${muted}`}
+      key={`${videoId}-${autoplay}-${muted}-${startTime ? Math.floor(startTime) : 0}`}
       className={className}
       src={`https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`}
       title={title}

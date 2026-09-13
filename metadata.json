@@ -1,0 +1,6 @@
+{
+  "name": "YouTube",
+  "description": "YouTube video streaming, search, playlists, and channels interface",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

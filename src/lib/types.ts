@@ -54,9 +54,13 @@ export interface ChannelData {
   avatarUrl: string;
   bannerUrl?: string;
   subscriberCount?: number;
+  subscriberText?: string;
+  videoCount?: number;
+  videoCountText?: string;
   description: string;
   verified?: boolean;
   relatedStreams: PipedVideo[];
+  shorts?: PipedVideo[];
 }
 
 export interface Subscription {

@@ -37,7 +37,10 @@ export default function PlaylistPage(props: Props) {
   if (error) {
     return (
       <div className="max-w-[1400px] mx-auto px-3 sm:px-6 pt-6">
-        <ErrorState onRetry={() => setAttempt((a) => a + 1)} message="تعذّر فتح قائمة التشغيل، حاول مرة أخرى." />
+        <ErrorState
+          onRetry={() => setAttempt((a) => a + 1)}
+          message="تعذّر فتح قائمة التشغيل، حاول مرة أخرى."
+        />
       </div>
     );
   }
@@ -66,7 +69,9 @@ export default function PlaylistPage(props: Props) {
           )}
           <div className="relative">
             <ListVideo className="w-9 h-9 mb-4" />
-            <h1 className="font-display font-black text-2xl leading-tight line-clamp-3">{data.title || props.title}</h1>
+            <h1 className="font-display font-black text-2xl leading-tight line-clamp-3">
+              {data.title || props.title}
+            </h1>
             <p className="text-sm text-white/80 mt-2">
               {data.uploaderName ? `${data.uploaderName} · ` : ""}
               {data.videoCount || list.length} فيديو
@@ -80,7 +85,9 @@ export default function PlaylistPage(props: Props) {
                 <PlayCircle className="w-4 h-4" /> تشغيل الكل
               </button>
               <button
-                onClick={() => list.length && props.onOpen(list[Math.floor(Math.random() * list.length)])}
+                onClick={() =>
+                  list.length && props.onOpen(list[Math.floor(Math.random() * list.length)])
+                }
                 disabled={!list.length}
                 className="w-9 h-9 rounded-full bg-white/20 grid place-items-center disabled:opacity-50"
                 aria-label="ترتيب عشوائي"
@@ -99,7 +106,9 @@ export default function PlaylistPage(props: Props) {
           <div className="space-y-3">
             {list.map((v, i) => (
               <div key={v.url} className="flex items-center gap-2">
-                <span className="w-6 text-center text-sm text-yt-sub shrink-0 tabular-nums">{i + 1}</span>
+                <span className="w-6 text-center text-sm text-yt-sub shrink-0 tabular-nums">
+                  {i + 1}
+                </span>
                 <div className="flex-1 min-w-0">
                   <VideoCard
                     video={v}

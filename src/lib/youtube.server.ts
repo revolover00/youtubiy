@@ -47,6 +47,7 @@ async function innertube<T = Json>(
 /* Generic JSON helpers                                                */
 /* ------------------------------------------------------------------ */
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 function collect(node: Json, key: string, out: Json[] = []): Json[] {
@@ -82,19 +83,32 @@ function parseDuration(s: string): number {
 }
 
 const MULTIPLIERS: [RegExp, number][] = [
-  [/ألف|k/i, 1_000],
-  [/مليون|m\b/i, 1_000_000],
-  [/مليار|b\b/i, 1_000_000_000],
+  [/مليار|مليارات|(?:\d|\s)b\b/i, 1_000_000_000],
+  [/مليون|ملايين|(?:\d|\s)m\b/i, 1_000_000],
+  [/ألف|آلاف|الاف|الف|(?:\d|\s)k\b/i, 1_000],
 ];
 
-/** "1.8 مليار مشاهدة" / "43,610 مشاهدات" → number. */
+/** "1.8 مليار مشاهدة" / "43,610 مشاهدات" / "2.67 مليون مشترك" / "6 آلاف من الفيديوهات" → number. */
 function parseCount(s: string): number {
   if (!s) return 0;
-  const cleaned = WESTERN(s);
-  const num = parseFloat(cleaned.replace(/[^\d.]/g, ""));
-  if (Number.isNaN(num)) return 0;
-  for (const [re, mult] of MULTIPLIERS) if (re.test(s)) return Math.round(num * mult);
-  return Math.round(num);
+  let cleaned = s.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  cleaned = cleaned.replace(/\u00a0/g, " ");
+
+  const hasMultiplier = MULTIPLIERS.some(([re]) => re.test(cleaned));
+  if (hasMultiplier) {
+    cleaned = cleaned.replace(/٫/g, ".");
+    cleaned = cleaned.replace(/(\d+),(\d+)/g, "$1.$2");
+    const match = cleaned.match(/(\d+(?:\.\d+)?)/);
+    if (!match) return 0;
+    const val = parseFloat(match[1]);
+    for (const [re, mult] of MULTIPLIERS) {
+      if (re.test(cleaned)) return Math.round(val * mult);
+    }
+    return Math.round(val);
+  } else {
+    const rawDigits = cleaned.replace(/[^\d]/g, "");
+    return rawDigits ? parseInt(rawDigits, 10) : 0;
+  }
 }
 
 const thumbFor = (id: string) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
@@ -109,7 +123,9 @@ function fromVideoRenderer(r: Json): PipedVideo | null {
   if (!id || !title) return null;
   const byline = r.longBylineText ?? r.ownerText ?? r.shortBylineText;
   const channelId =
-    collect(byline, "browseEndpoint")[0]?.browseId ?? collect(r, "browseEndpoint")[0]?.browseId ?? "";
+    collect(byline, "browseEndpoint")[0]?.browseId ??
+    collect(r, "browseEndpoint")[0]?.browseId ??
+    "";
   return {
     url: `/watch?v=${id}`,
     type: "stream",
@@ -137,9 +153,22 @@ function fromLockup(r: Json): PipedVideo | null {
 
   const rows: Json[] = collect(meta?.metadata, "metadataRows")[0] ?? [];
   const parts = (i: number): Json[] => rows[i]?.metadataParts ?? [];
-  const channelName = text(parts(0)[0]?.text);
-  const views = parseCount(text(parts(1)[0]?.text));
-  const uploadedDate = text(parts(1)[1]?.text);
+
+  let channelName = "";
+  let views = 0;
+  let uploadedDate = "";
+
+  if (rows.length >= 2) {
+    // Search / Home: Row 0 is channel name, Row 1 is views and uploaded date
+    channelName = text(parts(0)[0]?.text);
+    views = parseCount(text(parts(1)[0]?.text));
+    uploadedDate = text(parts(1)[1]?.text);
+  } else if (rows.length === 1) {
+    // Channel videos tab: Row 0 has views and uploaded date!
+    const row0 = parts(0);
+    views = parseCount(text(row0[0]?.text));
+    uploadedDate = text(row0[1]?.text);
+  }
 
   const badge = collect(r.contentImage, "thumbnailBadgeViewModel")[0];
   const channelId = collect(meta?.image, "browseEndpoint")[0]?.browseId ?? "";
@@ -148,8 +177,7 @@ function fromLockup(r: Json): PipedVideo | null {
     url: `/watch?v=${id}`,
     type: "stream",
     title,
-    thumbnail:
-      collect(r.contentImage, "sources")[0]?.at(-1)?.url ?? thumbFor(id),
+    thumbnail: collect(r.contentImage, "sources")[0]?.at(-1)?.url ?? thumbFor(id),
     uploaderName: channelName,
     uploaderUrl: channelId ? `/channel/${channelId}` : undefined,
     uploaderAvatar: collect(meta?.image, "sources")[0]?.[0]?.url,
@@ -241,14 +269,54 @@ function extractPlaylists(payload: Json): SearchPlaylist[] {
   return out;
 }
 
+function fromReelItem(r: Json): PipedVideo | null {
+  const id: string | undefined = r?.videoId;
+  const title = text(r?.headline);
+  if (!id || !title) return null;
+  return {
+    url: `/watch?v=${id}`,
+    type: "stream",
+    title,
+    thumbnail: r.thumbnail?.thumbnails?.at(-1)?.url ?? thumbFor(id),
+    uploaderName: "Shorts",
+    duration: 0,
+    views: parseCount(text(r.viewCountText)),
+  };
+}
+
+function fromShortsLockup(s: Json): PipedVideo | null {
+  if (!s) return null;
+  const videoId: string =
+    s.onTap?.innertubeCommand?.reelWatchEndpoint?.videoId ||
+    s.entityId?.replace("shorts-shelf-item-", "") ||
+    "";
+  if (!videoId) return null;
+  const title = text(s.overlayMetadata?.primaryText?.content) || "Shorts";
+  const views = parseCount(text(s.overlayMetadata?.secondaryText?.content));
+  const thumb =
+    s.thumbnail?.sources?.at(-1)?.url ||
+    s.onTap?.innertubeCommand?.reelWatchEndpoint?.thumbnail?.thumbnails?.at(-1)?.url ||
+    thumbFor(videoId);
+
+  return {
+    url: `/watch?v=${videoId}`,
+    type: "stream",
+    title,
+    thumbnail: thumb,
+    uploaderName: "Shorts",
+    duration: 0,
+    views,
+  };
+}
+
 /** Pull every playable video card out of any InnerTube response. */
 function extractVideos(payload: Json): PipedVideo[] {
   const out: PipedVideo[] = [];
   const seen = new Set<string>();
   const push = (v: PipedVideo | null) => {
     if (!v) return;
-    const id = v.url.slice(v.url.indexOf("=") + 1);
-    if (seen.has(id)) return;
+    const id = v.url.includes("=") ? v.url.slice(v.url.indexOf("=") + 1) : v.url.split("/").at(-1);
+    if (!id || seen.has(id)) return;
     seen.add(id);
     out.push(v);
   };
@@ -257,6 +325,8 @@ function extractVideos(payload: Json): PipedVideo[] {
   for (const r of collect(payload, "compactVideoRenderer")) push(fromVideoRenderer(r));
   for (const r of collect(payload, "lockupViewModel")) push(fromLockup(r));
   for (const r of collect(payload, "playlistVideoRenderer")) push(fromVideoRenderer(r));
+  for (const r of collect(payload, "reelItemRenderer")) push(fromReelItem(r));
+  for (const r of collect(payload, "shortsLockupViewModel")) push(fromShortsLockup(r));
   return out;
 }
 
@@ -280,10 +350,25 @@ export interface Page {
 }
 
 function continuationToken(payload: Json): string | null {
+  // 1. Look for continuationItemRenderer first (standard for list pagination)
+  const items = collect(payload, "continuationItemRenderer");
+  for (const item of items) {
+    const token =
+      item?.continuationEndpoint?.continuationCommand?.token ?? item?.continuationCommand?.token;
+    if (typeof token === "string" && token.length > 10) return token;
+  }
+
+  // 2. Fallback to any continuationCommand
   const tokens = collect(payload, "continuationCommand")
     .map((c: Json) => c?.token)
-    .filter((t: unknown): t is string => typeof t === "string");
-  return tokens.at(-1) ?? null;
+    .filter((t: unknown): t is string => typeof t === "string" && t.length > 10);
+  if (tokens.length) return tokens.at(-1) ?? null;
+
+  // 3. Legacy fallbacks
+  const legacy = collect(payload, "nextContinuationData");
+  if (legacy.length) return legacy[0]?.continuation ?? null;
+
+  return null;
 }
 
 export async function search(query: string, params = SEARCH_VIDEOS): Promise<PipedVideo[]> {
@@ -317,20 +402,18 @@ export async function playlist(id: string): Promise<PlaylistData> {
   const browseId = id.startsWith("VL") ? id : `VL${id}`;
   const data = await innertube("browse", { browseId });
   const header =
-    collect(data, "playlistHeaderRenderer")[0] ??
-    collect(data, "pageHeaderViewModel")[0] ??
-    {};
+    collect(data, "playlistHeaderRenderer")[0] ?? collect(data, "pageHeaderViewModel")[0] ?? {};
   const meta = collect(data, "microformatDataRenderer")[0] ?? {};
   const videos = extractVideos(data);
   const title =
-    text(header.title) || text(collect(header, "dynamicTextViewModel")[0]?.text) || meta.title || "قائمة تشغيل";
+    text(header.title) ||
+    text(collect(header, "dynamicTextViewModel")[0]?.text) ||
+    meta.title ||
+    "قائمة تشغيل";
   return {
     id: browseId.replace(/^VL/, ""),
     title,
-    thumbnail:
-      https(collect(header, "thumbnails")[0]?.at?.(-1)?.url) ||
-      videos[0]?.thumbnail ||
-      "",
+    thumbnail: https(collect(header, "thumbnails")[0]?.at?.(-1)?.url) || videos[0]?.thumbnail || "",
     videoCount: parseCount(text(header.numVideosText)) || videos.length,
     uploaderName: text(header.ownerText) || text(collect(header, "ownerText")[0]),
     description: meta.description ?? text(header.descriptionText),
@@ -371,7 +454,9 @@ export async function trendingPage(cursors?: (string | null)[]): Promise<Trendin
     TRENDING_QUERIES.map((q, i) => {
       if (cursors) {
         const c = cursors[i];
-        return c ? searchPage(q, SEARCH_HOT, c) : Promise.resolve<Page>({ items: [], continuation: null, channels: [], playlists: [] });
+        return c
+          ? searchPage(q, SEARCH_HOT, c)
+          : Promise.resolve<Page>({ items: [], continuation: null, channels: [], playlists: [] });
       }
       return searchPage(q, SEARCH_HOT);
     }),
@@ -488,7 +573,13 @@ export async function channel(input: string): Promise<ChannelData> {
     if (!browseId) throw new Error("channel not found");
   }
 
-  const data = await innertube("browse", { browseId, params: "EgZ2aWRlb3PyBgQKAjoA" });
+  const [vidsResult, shortsResult] = await Promise.allSettled([
+    innertube("browse", { browseId, params: "EgZ2aWRlb3PyBgQKAjoA" }),
+    innertube("browse", { browseId, params: "EgZzaG9ydHPyBgUKA5oBAA%3D%3D" }),
+  ]);
+
+  const data = vidsResult.status === "fulfilled" ? vidsResult.value : {};
+  const shortsData = shortsResult.status === "fulfilled" ? shortsResult.value : {};
 
   const header =
     collect(data, "c4TabbedHeaderRenderer")[0] ?? collect(data, "pageHeaderViewModel")[0] ?? {};
@@ -510,24 +601,57 @@ export async function channel(input: string): Promise<ChannelData> {
     header?.banner?.thumbnails?.at(-1)?.url ??
     collect(header, "banner")[0]?.imageBannerViewModel?.image?.sources?.at(-1)?.url;
 
-  const subsLabel =
+  const metaParts = collect(header, "metadataParts").flat();
+  const subsPart = metaParts.find((p: Json) =>
+    /مشترك|subscri/i.test(text(p?.text) || text(p?.accessibilityLabel)),
+  );
+  const vidsPart = metaParts.find((p: Json) =>
+    /فيديو|video/i.test(text(p?.text) || text(p?.accessibilityLabel)),
+  );
+
+  const subscriberText =
+    text(subsPart?.text) ||
+    text(subsPart?.accessibilityLabel) ||
     text(header.subscriberCountText) ||
-    collect(header, "metadataParts")[0]?.find?.((p: Json) => /مشترك|subscrib/i.test(text(p?.text)))
-      ? text(
-          collect(header, "metadataParts")[0]?.find((p: Json) =>
-            /مشترك|subscrib/i.test(text(p?.text)),
-          )?.text,
-        )
-      : "";
+    "";
+  const videoCountText =
+    text(vidsPart?.text) ||
+    text(vidsPart?.accessibilityLabel) ||
+    text(header.videosCountText) ||
+    text(header.videoCountText) ||
+    "";
+
+  const subscriberCount = parseCount(subscriberText);
+  const videoCount = parseCount(videoCountText);
+
+  // Extract channel videos and make sure uploader metadata is set
+  const videos = extractVideos(data).map((v) => ({
+    ...v,
+    uploaderName: v.uploaderName || name,
+    uploaderAvatar: v.uploaderAvatar || avatar,
+    uploaderUrl: v.uploaderUrl || `/channel/${browseId}`,
+  }));
+
+  // Extract channel shorts
+  const shorts = extractVideos(shortsData).map((s) => ({
+    ...s,
+    uploaderName: name,
+    uploaderAvatar: avatar,
+    uploaderUrl: `/channel/${browseId}`,
+  }));
 
   return {
     id: browseId,
     name,
     avatarUrl: avatar,
     bannerUrl: banner,
-    subscriberCount: parseCount(subsLabel),
+    subscriberCount: subscriberCount || undefined,
+    subscriberText: subscriberText || undefined,
+    videoCount: videoCount || undefined,
+    videoCountText: videoCountText || undefined,
     description: meta.description ?? "",
     verified: JSON.stringify(header.badges ?? []).includes("VERIFIED"),
-    relatedStreams: extractVideos(data),
+    relatedStreams: videos,
+    shorts,
   };
 }
