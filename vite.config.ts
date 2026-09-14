@@ -17,16 +17,19 @@ export default defineConfig({
     plugins: [
       VitePWA({
         registerType: "autoUpdate",
+        includeAssets: ["favicon.svg", "robots.txt"],
         devOptions: {
           enabled: true,
+          type: "module",
         },
         manifest: {
-          name: "YouTube",
-          short_name: "YouTube",
-          description: "YouTube Video Player and Search",
+          name: "Youtubiy",
+          short_name: "Youtubiy",
+          description: "YouTube client with background playback and search",
           theme_color: "#0f0f0f",
           background_color: "#0f0f0f",
           display: "standalone",
+          orientation: "any",
           start_url: "/",
           scope: "/",
           icons: [

@@ -84,6 +84,14 @@ export function setLiked(ids: string[]) {
   setLocalLiked(ids);
 }
 
+export function getBackgroundPlay(): boolean {
+  return read<boolean>("yt.bgPlay", true);
+}
+
+export function setBackgroundPlay(enabled: boolean) {
+  write("yt.bgPlay", enabled);
+}
+
 /* ------------------------------------------------------------------ */
 /* User Profile Synchronization with Firestore                        */
 /* ------------------------------------------------------------------ */

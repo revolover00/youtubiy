@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { X, Globe, Moon, Trash2, Check, AlertCircle } from "lucide-react";
+import { X, Globe, Moon, Trash2, Check, AlertCircle, Play, Download, Smartphone } from "lucide-react";
 import { useLanguage, type Language } from "../lib/i18n";
-import { clearHistory } from "../lib/store";
+import { clearHistory, setBackgroundPlay as persistBackgroundPlay } from "../lib/store";
+import { useAppStore, appStore } from "../lib/appStore";
+import { usePWA } from "../lib/usePWA";
 
 interface Props {
   open: boolean;
@@ -11,10 +13,20 @@ interface Props {
 }
 
 export default function SettingsDialog({ open, onClose, onHistoryCleared, notify }: Props) {
-  const { lang, setLang, t, dir } = useLanguage();
+  const { lang, setLang, t, dir, isAr } = useLanguage();
   const [confirmClear, setConfirmClear] = useState(false);
+  const { backgroundPlay } = useAppStore();
+  const { isInstallable, isInstalled, isIOS, install } = usePWA();
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
 
   if (!open) return null;
+
+  const toggleBackgroundPlay = () => {
+    const next = !backgroundPlay;
+    appStore.setBackgroundPlay(next);
+    persistBackgroundPlay(next);
+    notify(isAr ? "تم تحديث إعدادات التشغيل" : "Playback settings updated");
+  };
 
   const handleClearHistory = async () => {
     await clearHistory();
@@ -102,6 +114,99 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
                 Dark
               </span>
             </div>
+          </div>
+
+          <hr className="border-yt-border" />
+
+          {/* Background Play */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5 text-base font-bold text-yt-text">
+              <Play className="w-5 h-5 text-yt-blue" />
+              <span>{t("settingsBackgroundPlay")}</span>
+            </div>
+            <p className="text-xs text-yt-sub leading-relaxed">
+              {t("settingsBackgroundPlayDesc")}
+            </p>
+            <button
+              onClick={toggleBackgroundPlay}
+              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface transition-colors"
+            >
+              <span className="text-sm font-medium">
+                {backgroundPlay
+                  ? isAr
+                    ? "مفعّل"
+                    : "Enabled"
+                  : isAr
+                    ? "معطّل"
+                    : "Disabled"}
+              </span>
+              <div
+                className={`w-12 h-6 rounded-full transition-colors relative ${
+                  backgroundPlay ? "bg-yt-blue" : "bg-yt-surface"
+                }`}
+              >
+                <div
+                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                    backgroundPlay ? (isAr ? "right-7" : "left-7") : isAr ? "right-1" : "left-1"
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+
+          <hr className="border-yt-border" />
+
+          {/* Install App */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5 text-base font-bold text-yt-text">
+              <Smartphone className="w-5 h-5 text-yt-blue" />
+              <span>{t("settingsInstallApp")}</span>
+            </div>
+            <p className="text-xs text-yt-sub leading-relaxed">{t("settingsInstallAppDesc")}</p>
+
+            {isInstalled ? (
+              <div className="flex items-center gap-2 p-3.5 rounded-xl bg-yt-blue/10 border border-yt-blue/20 text-yt-blue">
+                <Check className="w-4 h-4" />
+                <span className="text-sm font-medium">{t("settingsInstalled")}</span>
+              </div>
+            ) : isInstallable ? (
+              <button
+                onClick={install}
+                className="w-full flex items-center justify-center gap-2 p-3.5 rounded-xl bg-yt-blue hover:bg-opacity-90 text-black font-bold transition-all shadow-lg shadow-yt-blue/10"
+              >
+                <Download className="w-4 h-4" />
+                <span>{t("install")}</span>
+              </button>
+            ) : isIOS ? (
+              <button
+                onClick={() => setShowIOSGuide(true)}
+                className="w-full flex items-center justify-center gap-2 p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface text-yt-text font-medium transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>{isAr ? "تثبيت على iOS" : "Install on iOS"}</span>
+              </button>
+            ) : null}
+
+            {showIOSGuide && (
+              <div className="p-4 rounded-xl bg-yt-surface border border-yt-border space-y-3 animate-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold">
+                    {isAr ? "التثبيت على iPhone / iPad" : "Install on iPhone / iPad"}
+                  </h4>
+                  <button onClick={() => setShowIOSGuide(false)}>
+                    <X className="w-4 h-4 text-yt-sub" />
+                  </button>
+                </div>
+                <div className="text-xs text-yt-sub space-y-2">
+                  <p>
+                    1. {isAr ? "اضغط على زر المشاركة في متصفح Safari." : "Tap the Share button in Safari toolbar."}
+                  </p>
+                  <p>
+                    2. {isAr ? "مرر للأسفل واضغط على 'إضافة إلى الشاشة الرئيسية'." : "Scroll down and tap 'Add to Home Screen'."}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <hr className="border-yt-border" />

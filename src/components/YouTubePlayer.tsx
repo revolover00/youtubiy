@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useAppStore } from "../lib/appStore";
 
 interface Props {
   videoId: string;
@@ -64,9 +65,12 @@ export default function YouTubePlayer({
     }
   };
 
+  const { backgroundPlay } = useAppStore();
+
   useEffect(() => {
-    // Keep YouTube playing when tab is hidden or backgrounded
+    // Keep YouTube playing when tab is hidden or backgrounded (if enabled)
     const handleVisibility = () => {
+      if (!backgroundPlay) return;
       if (document.visibilityState === "hidden" && iframeRef.current?.contentWindow) {
         // Send a play command to override YouTube's auto-pause on blur
         // We do this twice with a small delay to ensure it catches the pause event from YouTube
@@ -84,7 +88,7 @@ export default function YouTubePlayer({
 
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, []);
+  }, [backgroundPlay]);
 
   // Media Session API for background play controls
   useEffect(() => {
@@ -112,6 +116,7 @@ export default function YouTubePlayer({
         JSON.stringify({ event: "command", func: "playVideo", args: [] }),
         "*"
       );
+      navigator.mediaSession.playbackState = "playing";
     });
 
     navigator.mediaSession.setActionHandler("pause", () => {
@@ -119,6 +124,7 @@ export default function YouTubePlayer({
         JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
         "*"
       );
+      navigator.mediaSession.playbackState = "paused";
     });
 
     // Handle seek
@@ -131,13 +137,18 @@ export default function YouTubePlayer({
       }
     });
 
+    // Explicitly set playback state to signal background audio permission
+    if (autoplay) {
+      navigator.mediaSession.playbackState = "playing";
+    }
+
     return () => {
       navigator.mediaSession.metadata = null;
       navigator.mediaSession.setActionHandler("play", null);
       navigator.mediaSession.setActionHandler("pause", null);
       navigator.mediaSession.setActionHandler("seekto", null);
     };
-  }, [videoId, title]);
+  }, [videoId, title, autoplay]);
 
   const params = new URLSearchParams({
     autoplay: autoplay ? "1" : "0",

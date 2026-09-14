@@ -142,6 +142,12 @@ export const TRANSLATIONS = {
     settingsClearHistory: "Clear all watch history",
     settingsClearHistorySuccess: "Watch history cleared successfully",
     settingsClose: "Close",
+    settingsBackgroundPlay: "Background Playback",
+    settingsBackgroundPlayDesc: "Keep video playing when switching apps or locking screen",
+    settingsInstallApp: "Install Application",
+    settingsInstallAppDesc: "Install Youtubiy as a standalone app for better performance",
+    settingsInstalled: "App is already installed",
+    install: "Install",
   },
   ar: {
     // Brand
@@ -280,6 +286,12 @@ export const TRANSLATIONS = {
     settingsClearHistory: "محو سجل المشاهدة بالكامل",
     settingsClearHistorySuccess: "تم محو سجل المشاهدة بنجاح",
     settingsClose: "إغلاق",
+    settingsBackgroundPlay: "التشغيل في الخلفية",
+    settingsBackgroundPlayDesc: "استمرار تشغيل الفيديو عند التبديل بين التطبيقات أو قفل الشاشة",
+    settingsInstallApp: "تثبيت التطبيق",
+    settingsInstallAppDesc: "تثبيت Youtubiy كتطبيق مستقل لأداء أفضل وميزات إضافية",
+    settingsInstalled: "التطبيق مثبت بالفعل",
+    install: "تثبيت",
   },
 };
 

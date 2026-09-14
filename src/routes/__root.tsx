@@ -79,18 +79,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "YouTube" },
-      { name: "description", content: "YouTube Video Player and Search" },
-      { name: "author", content: "YouTube" },
-      { property: "og:title", content: "YouTube" },
-      { property: "og:description", content: "YouTube Video Player and Search" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" },
+      { title: "Youtubiy" },
+      { name: "description", content: "YouTube client with background playback and search" },
+      { name: "author", content: "Youtubiy" },
+      { property: "og:title", content: "Youtubiy" },
+      { property: "og:description", content: "YouTube client with background playback and search" },
       { property: "og:type", content: "website" },
       { name: "theme-color", content: "#0f0f0f" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { name: "apple-mobile-web-app-title", content: "YouTube" },
+      { name: "apple-mobile-web-app-title", content: "Youtubiy" },
     ],
     links: [
       {
@@ -102,6 +102,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: appCss,
       },
       { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "apple-touch-icon", href: "/favicon.svg" },
       { rel: "alternate icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },

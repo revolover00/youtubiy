@@ -43,6 +43,7 @@ interface AppStoreState {
   searchFilter: SearchFilter;
   miniplayer: MiniplayerState | null;
   playbackTimes: Record<string, number>;
+  backgroundPlay: boolean;
   route: RouteState;
 }
 
@@ -51,6 +52,7 @@ let state: AppStoreState = {
   searchFilter: "All",
   miniplayer: null,
   playbackTimes: {},
+  backgroundPlay: true,
   route: { type: "home" },
 };
 
@@ -90,6 +92,12 @@ export const appStore = {
 
   setMiniplayer(m: MiniplayerState | null) {
     state = { ...state, miniplayer: m };
+    notify();
+  },
+
+  setBackgroundPlay(enabled: boolean) {
+    if (state.backgroundPlay === enabled) return;
+    state = { ...state, backgroundPlay: enabled };
     notify();
   },
 

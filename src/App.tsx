@@ -51,6 +51,8 @@ import {
   syncLikedToCloud,
   fetchUserWatchLater,
   fetchUserLiked,
+  getBackgroundPlay,
+  setBackgroundPlay,
 } from "./lib/store";
 import { useAuth } from "./lib/AuthContext";
 import type {
@@ -159,6 +161,8 @@ export default function App() {
     fetchUserLiked()
       .then(setLikedState)
       .catch(() => setLikedState(getLiked()));
+
+    appStore.setBackgroundPlay(getBackgroundPlay());
   }, [user]);
 
   // Listen for YouTube sync completion events
