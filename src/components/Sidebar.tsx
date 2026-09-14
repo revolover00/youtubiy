@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { ShortsIcon, SubscriptionsIcon, LogoIcon } from "./icons";
-import type { Subscription } from "../lib/types";
+import type { Subscription, UserPlaylist } from "../lib/types";
 import { useLanguage } from "../lib/i18n";
 
 interface Props {
@@ -28,6 +28,7 @@ interface Props {
   pushable?: boolean;
   active: string;
   subs: Subscription[];
+  customPlaylists?: UserPlaylist[];
   onNavigate: (label: string) => void;
   onHome: () => void;
   mobileOpen: boolean;
@@ -62,10 +63,11 @@ function Item({
 function FullContent({
   active,
   subs,
+  customPlaylists = [],
   onNavigate,
   onHome,
   onOpenSettings,
-}: Pick<Props, "active" | "subs" | "onNavigate" | "onHome" | "onOpenSettings">) {
+}: Pick<Props, "active" | "subs" | "onNavigate" | "onHome" | "onOpenSettings" | "customPlaylists">) {
   const { t, isAr } = useLanguage();
 
   const MAIN = [
@@ -123,6 +125,15 @@ function FullContent({
             label={y.label}
             active={active === y.label}
             onClick={() => onNavigate(y.label)}
+          />
+        ))}
+        {customPlaylists.slice(0, 5).map((p) => (
+          <Item
+            key={p.id}
+            icon={ListVideo}
+            label={p.title}
+            active={active === `playlist:${p.id}`}
+            onClick={() => onNavigate(`playlist:${p.id}`)}
           />
         ))}
       </div>
@@ -211,6 +222,7 @@ export default function Sidebar({
   pushable = true,
   active,
   subs,
+  customPlaylists = [],
   onNavigate,
   onHome,
   mobileOpen,
@@ -265,6 +277,7 @@ export default function Sidebar({
           <FullContent
             active={active}
             subs={subs}
+            customPlaylists={customPlaylists}
             onNavigate={onNavigate}
             onHome={onHome}
             onOpenSettings={onOpenSettings}
@@ -298,6 +311,7 @@ export default function Sidebar({
           <FullContent
             active={active}
             subs={subs}
+            customPlaylists={customPlaylists}
             onNavigate={(l) => {
               onNavigate(l);
               onCloseMobile();

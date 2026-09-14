@@ -7,7 +7,7 @@ const STORAGE_KEY = "yt_lang";
 export const TRANSLATIONS = {
   en: {
     // Brand
-    brandName: "YouTube",
+    brandName: "youtubiy",
     countryCode: "US",
 
     // Header
@@ -151,7 +151,7 @@ export const TRANSLATIONS = {
   },
   ar: {
     // Brand
-    brandName: "يوتيوب",
+    brandName: "youtubiy",
     countryCode: "EG",
 
     // Header

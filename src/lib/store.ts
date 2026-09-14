@@ -1,6 +1,16 @@
-import { collection, deleteDoc, doc, getDocs, setDoc, writeBatch } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  writeBatch,
+  query,
+  orderBy,
+} from "firebase/firestore";
 import { auth, db, handleFirestoreError, OperationType } from "./firebase";
-import type { HistoryRow, Subscription, VideoMeta } from "./types";
+import type { HistoryRow, Subscription, VideoMeta, UserPlaylist } from "./types";
 
 /* ------------------------------------------------------------------ */
 /* Local persistence (fallback and offline cache)                     */
@@ -373,6 +383,164 @@ export async function syncLikedToCloud(videoId: string, isLiked: boolean): Promi
     }
   } catch (error) {
     handleFirestoreError(error, isLiked ? OperationType.WRITE : OperationType.DELETE, docPath);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Custom User Playlists: Firestore + Local Cache                     */
+/* ------------------------------------------------------------------ */
+
+export async function getCustomPlaylists(): Promise<UserPlaylist[]> {
+  const local = read<UserPlaylist[]>("yt.playlists", []);
+  const currentUser = auth.currentUser;
+  if (!currentUser) return local;
+
+  try {
+    const q = query(
+      collection(db, "users", currentUser.uid, "playlists"),
+      orderBy("updatedAt", "desc"),
+    );
+    const snap = await getDocs(q);
+    const remote: UserPlaylist[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      remote.push({
+        id: d.id,
+        title: data.title || "Untitled Playlist",
+        description: data.description || "",
+        videoIds: data.videoIds || [],
+        thumbnail: data.thumbnail || "",
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+      });
+    });
+
+    if (remote.length > 0) {
+      write("yt.playlists", remote);
+      return remote;
+    }
+    return local;
+  } catch (error) {
+    console.warn("Falling back to local playlists:", error);
+    return local;
+  }
+}
+
+export async function createCustomPlaylist(title: string, description = ""): Promise<UserPlaylist> {
+  const now = new Date().toISOString();
+  const playlist: UserPlaylist = {
+    id: "pl_" + Math.random().toString(36).slice(2) + Date.now().toString(16),
+    title,
+    description,
+    videoIds: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const current = read<UserPlaylist[]>("yt.playlists", []);
+  write("yt.playlists", [playlist, ...current]);
+  window.dispatchEvent(new CustomEvent("yt:playlists-updated"));
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return playlist;
+
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "playlists", playlist.id);
+    await setDoc(docRef, {
+      title: playlist.title,
+      description: playlist.description,
+      videoIds: playlist.videoIds,
+      createdAt: playlist.createdAt,
+      updatedAt: playlist.updatedAt,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/playlists/${playlist.id}`);
+  }
+  return playlist;
+}
+
+export async function deleteCustomPlaylist(id: string): Promise<void> {
+  const current = read<UserPlaylist[]>("yt.playlists", []);
+  write(
+    "yt.playlists",
+    current.filter((p) => p.id !== id),
+  );
+  window.dispatchEvent(new CustomEvent("yt:playlists-updated"));
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "playlists", id);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/playlists/${id}`);
+  }
+}
+
+export async function addToPlaylist(playlistId: string, videoId: string): Promise<void> {
+  const all = read<UserPlaylist[]>("yt.playlists", []);
+  const pl = all.find((p) => p.id === playlistId);
+  if (!pl) return;
+
+  if (pl.videoIds.includes(videoId)) return;
+
+  const meta = getMeta(videoId);
+  pl.videoIds.push(videoId);
+  pl.updatedAt = new Date().toISOString();
+  if (!pl.thumbnail && meta?.thumbnail) {
+    pl.thumbnail = meta.thumbnail;
+  }
+
+  write("yt.playlists", all);
+  window.dispatchEvent(new CustomEvent("yt:playlists-updated"));
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "playlists", playlistId);
+    await updateDoc(docRef, {
+      videoIds: pl.videoIds,
+      thumbnail: pl.thumbnail || "",
+      updatedAt: pl.updatedAt,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/playlists/${playlistId}`);
+  }
+}
+
+export async function removeFromPlaylist(playlistId: string, videoId: string): Promise<void> {
+  const all = read<UserPlaylist[]>("yt.playlists", []);
+  const pl = all.find((p) => p.id === playlistId);
+  if (!pl) return;
+
+  pl.videoIds = pl.videoIds.filter((id) => id !== videoId);
+  pl.updatedAt = new Date().toISOString();
+
+  // Update thumbnail if the first video was removed
+  if (pl.videoIds.length > 0) {
+    const firstMeta = getMeta(pl.videoIds[0]);
+    pl.thumbnail = firstMeta?.thumbnail || "";
+  } else {
+    pl.thumbnail = "";
+  }
+
+  write("yt.playlists", all);
+  window.dispatchEvent(new CustomEvent("yt:playlists-updated"));
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "playlists", playlistId);
+    await updateDoc(docRef, {
+      videoIds: pl.videoIds,
+      thumbnail: pl.thumbnail || "",
+      updatedAt: pl.updatedAt,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/playlists/${playlistId}`);
   }
 }
 

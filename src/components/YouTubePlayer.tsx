@@ -66,23 +66,32 @@ export default function YouTubePlayer({
   };
 
   const { backgroundPlay } = useAppStore();
+  const { lang } = useLanguage();
 
   useEffect(() => {
     // Keep YouTube playing when tab is hidden or backgrounded (if enabled)
     const handleVisibility = () => {
       if (!backgroundPlay) return;
+      // We check if the current document is hidden
       if (document.visibilityState === "hidden" && iframeRef.current?.contentWindow) {
         // Send a play command to override YouTube's auto-pause on blur
-        // We do this twice with a small delay to ensure it catches the pause event from YouTube
         const play = () => {
-          iframeRef.current?.contentWindow?.postMessage(
+          if (!iframeRef.current?.contentWindow) return;
+          iframeRef.current.contentWindow.postMessage(
             JSON.stringify({ event: "command", func: "playVideo", args: [] }),
             "*"
           );
         };
+        // Sequence of play commands to fight YouTube's internal blur pause logic
         play();
-        setTimeout(play, 100);
-        setTimeout(play, 500);
+        const t1 = setTimeout(play, 150);
+        const t2 = setTimeout(play, 400);
+        const t3 = setTimeout(play, 1000);
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(t2);
+          clearTimeout(t3);
+        };
       }
     };
 
@@ -92,11 +101,11 @@ export default function YouTubePlayer({
 
   // Media Session API for background play controls
   useEffect(() => {
-    if (!("mediaSession" in navigator) || !window.MediaSessionMetadata) return;
+    if (!("mediaSession" in navigator)) return;
 
-    navigator.mediaSession.metadata = new window.MediaSessionMetadata({
+    navigator.mediaSession.metadata = new MediaMetadata({
       title: title || "فيديو",
-      artist: "YouTube",
+      artist: t ? t("brandName") : "Youtubiy",
       artwork: [
         {
           src: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
@@ -111,33 +120,31 @@ export default function YouTubePlayer({
       ],
     });
 
+    const sendCommand = (func: string, args: any[] = []) => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: "command", func, args }),
+          "*"
+        );
+      }
+    };
+
     navigator.mediaSession.setActionHandler("play", () => {
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ event: "command", func: "playVideo", args: [] }),
-        "*"
-      );
+      sendCommand("playVideo");
       navigator.mediaSession.playbackState = "playing";
     });
 
     navigator.mediaSession.setActionHandler("pause", () => {
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
-        "*"
-      );
+      sendCommand("pauseVideo");
       navigator.mediaSession.playbackState = "paused";
     });
 
-    // Handle seek
     navigator.mediaSession.setActionHandler("seekto", (details) => {
-      if (details.seekTime) {
-        iframeRef.current?.contentWindow?.postMessage(
-          JSON.stringify({ event: "command", func: "seekTo", args: [details.seekTime, true] }),
-          "*"
-        );
+      if (details.seekTime != null) {
+        sendCommand("seekTo", [details.seekTime, true]);
       }
     });
 
-    // Explicitly set playback state to signal background audio permission
     if (autoplay) {
       navigator.mediaSession.playbackState = "playing";
     }
@@ -150,31 +157,29 @@ export default function YouTubePlayer({
     };
   }, [videoId, title, autoplay]);
 
-  const params = new URLSearchParams({
-    autoplay: autoplay ? "1" : "0",
-    mute: muted ? "1" : "0",
-    controls: controls ? "1" : "0",
-    playsinline: "1",
-    rel: "0",
-    modestbranding: "1",
-    hl: "ar",
-    origin: typeof window !== "undefined" ? window.location.origin : "",
-    // no annotations / info cards / promoted overlays inside the frame
-    iv_load_policy: "3",
-    disablekb: "0",
-    fs: "1",
-    enablejsapi: "1",
-    widgetid: "1",
-  });
-
-  if (startTime && startTime > 0) {
-    params.set("start", String(Math.floor(startTime)));
-  }
-
-  if (loop) {
-    params.set("loop", "1");
-    params.set("playlist", videoId);
-  }
+  const params = useMemo(() => {
+    const p = new URLSearchParams({
+      autoplay: autoplay ? "1" : "0",
+      mute: muted ? "1" : "0",
+      controls: controls ? "1" : "0",
+      playsinline: "1",
+      rel: "0",
+      modestbranding: "1",
+      hl: lang || "ar",
+      origin: typeof window !== "undefined" ? window.location.origin : "",
+      iv_load_policy: "3",
+      disablekb: "0",
+      fs: "1",
+      enablejsapi: "1",
+      widgetid: "1",
+    });
+    if (startTime && startTime > 0) p.set("start", String(Math.floor(startTime)));
+    if (loop) {
+      p.set("loop", "1");
+      p.set("playlist", videoId);
+    }
+    return p;
+  }, [videoId, autoplay, muted, controls, lang, startTime, loop]);
 
   return (
     <iframe

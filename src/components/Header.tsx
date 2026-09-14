@@ -94,19 +94,31 @@ export default function Header({
       const r = await suggestions(q);
       setSugg(r.slice(0, 10));
     }, 180);
+
+    return () => {
+      if (suggTimer.current) window.clearTimeout(suggTimer.current);
+    };
   }, [query]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimer.current) window.clearTimeout(blurTimer.current);
+      if (suggTimer.current) window.clearTimeout(suggTimer.current);
+    };
+  }, []);
 
   // live results while typing — no need to press Enter
   useEffect(() => {
     const q = query.trim();
     if (!onLiveSearch || q.length < 2) return;
-    const t = window.setTimeout(() => onLiveSearch(q), 450);
-    return () => window.clearTimeout(t);
+    const tId = window.setTimeout(() => onLiveSearch(q), 450);
+    return () => window.clearTimeout(tId);
   }, [query, onLiveSearch]);
 
   // arrow keys walk the suggestions and complete the input
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!sugg.length) return;
+    if (!sugg.length || !focused) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const next =
@@ -117,6 +129,7 @@ export default function Header({
       setQuery(sugg[next]);
     } else if (e.key === "Escape") {
       setFocused(false);
+      (e.target as HTMLInputElement).blur();
     }
   };
 

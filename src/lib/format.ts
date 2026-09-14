@@ -25,16 +25,12 @@ export function fmtDuration(s?: number, lang: "en" | "ar" = "en"): string {
 
 export function fmtViews(n?: number | null, lang: "en" | "ar" = "ar"): string {
   if (n == null || isNaN(n)) return "";
-  if (lang === "ar") {
-    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, "")} مليار`;
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} مليون`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")} ألف`;
-    return String(n);
-  }
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  return String(n);
+  const formatter = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
+    notation: "compact",
+    compactDisplay: "short",
+    maximumFractionDigits: 1,
+  });
+  return formatter.format(n);
 }
 
 const UNIT_DAYS: [RegExp, number][] = [

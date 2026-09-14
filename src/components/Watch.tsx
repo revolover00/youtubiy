@@ -5,6 +5,7 @@ import {
   Share2,
   Download,
   ListPlus,
+  ListVideo,
   MoreHorizontal,
   BadgeCheck,
   CornerDownLeft,
@@ -29,6 +30,7 @@ interface Props {
   onToggleLike: () => void;
   saved: boolean;
   onToggleSave: () => void;
+  onAddToPlaylist: (v: PipedVideo) => void;
   isSubscribed: (channelId: string) => boolean;
   onToggleSub: (meta: { channelId: string; name: string; avatar?: string }) => void;
   onMinimize?: () => void;
@@ -45,23 +47,39 @@ export default function Watch({
   onToggleLike,
   saved,
   onToggleSave,
+  onAddToPlaylist,
   isSubscribed,
   onToggleSub,
   onMinimize,
   startTime,
   onTimeUpdate,
 }: Props) {
-  const { t } = useLanguage();
+  const { t, isAr } = useLanguage();
   const id = videoIdFromUrl(video.url);
   const [data, setData] = useState<StreamData | null>(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [disliked, setDisliked] = useState(false);
-  const [relFilter, setRelFilter] = useState<"الكل" | "من القناة" | "قصيرة">("الكل");
+  const labels = useMemo(
+    () => ({
+      all: isAr ? "الكل" : "All",
+      fromChannel: isAr ? "من القناة" : "From channel",
+      shorts: isAr ? "قصيرة" : "Shorts",
+    }),
+    [isAr],
+  );
+
+  const [relFilter, setRelFilter] = useState<string>(labels.all);
+
+  useEffect(() => {
+    setRelFilter(labels.all);
+  }, [labels.all]);
 
   useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
+
     setData(null);
     setError(false);
     getStreams(id)
@@ -76,24 +94,29 @@ export default function Watch({
           duration: video.duration,
         });
       })
-      .catch(() => alive && setError(true));
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        if (alive) setError(true);
+      });
+
     return () => {
       alive = false;
+      controller.abort();
     };
   }, [id, attempt, video.thumbnail, video.duration]);
 
   const related = useMemo(() => {
     const list = (data?.relatedStreams || []).filter((r) => r.url?.includes("/watch"));
-    if (relFilter === "من القناة") {
+    if (relFilter === labels.fromChannel) {
       const f = list.filter((r) => r.uploaderName === (data?.uploader || video.uploaderName));
       if (f.length) return f;
     }
-    if (relFilter === "قصيرة") {
+    if (relFilter === labels.shorts) {
       const f = list.filter((r) => r.duration > 0 && r.duration <= 60);
       if (f.length) return f;
     }
     return list;
-  }, [data, relFilter, video.uploaderName]);
+  }, [data, relFilter, video.uploaderName, labels]);
 
   useEffect(() => {
     if (data) {
@@ -250,11 +273,11 @@ export default function Watch({
               <Download className="w-5 h-5" /> <span className="hidden sm:inline">تنزيل</span>
             </button>
             <button
-              onClick={onToggleSave}
-              className={`flex items-center gap-2 h-9 px-3.5 rounded-full text-sm font-medium transition-colors ${saved ? "bg-yt-text text-yt-bg" : "bg-yt-surface hover:bg-yt-hover"}`}
+              onClick={() => onAddToPlaylist(video)}
+              className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
             >
-              <ListPlus className="w-5 h-5" />{" "}
-              <span className="hidden xl:inline">{saved ? "محفوظ" : "حفظ"}</span>
+              <ListVideo className="w-5 h-5" />
+              <span className="hidden sm:inline">{isAr ? "حفظ" : "Save"}</span>
             </button>
             {onMinimize && (
               <button
@@ -332,7 +355,7 @@ export default function Watch({
       {/* related */}
       <aside className="lg:w-[400px] xl:w-[420px] shrink-0">
         <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
-          {(["الكل", "من القناة", "قصيرة"] as const).map((t) => (
+          {Object.values(labels).map((t) => (
             <button
               key={t}
               onClick={() => setRelFilter(t)}

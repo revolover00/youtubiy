@@ -14,11 +14,12 @@ import {
   Trash2,
   Shuffle,
   Loader2,
+  Plus,
 } from "lucide-react";
 import { getTrending, searchVideos } from "../lib/api";
 import { TOPIC_QUERY } from "../lib/config";
-import { getMeta } from "../lib/store";
-import type { PipedVideo } from "../lib/types";
+import { getMeta, getCustomPlaylists, createCustomPlaylist } from "../lib/store";
+import type { PipedVideo, UserPlaylist } from "../lib/types";
 import { EmptyState, ErrorState, SkeletonGrid, VideoCard } from "./Feed";
 import { useLanguage } from "../lib/i18n";
 
@@ -58,7 +59,7 @@ interface Props {
   onRemoveLater: (id: string) => void;
   onClearHistory: () => void;
   isSaved: (id: string) => boolean;
-  onSaveLater: (id: string) => void;
+  onSaveLater: (id: string, video?: PipedVideo) => void;
 }
 
 function normalizeKey(page: string): string {
@@ -120,8 +121,27 @@ function idsToVideos(ids: string[]): PipedVideo[] {
 
 export default function LibraryPage(props: Props) {
   const { page } = props;
-  const { lang, t, isAr } = useLanguage();
+  const { t, isAr } = useLanguage();
   const normalized = normalizeKey(page);
+
+  const [customPlaylists, setCustomPlaylists] = useState<UserPlaylist[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+
+  useEffect(() => {
+    if (normalized === "playlists") {
+      getCustomPlaylists().then(setCustomPlaylists);
+    }
+  }, [normalized]);
+
+  const handleCreate = async () => {
+    if (!newTitle.trim()) return;
+    const pl = await createCustomPlaylist(newTitle.trim());
+    setCustomPlaylists((prev) => [pl, ...prev]);
+    setNewTitle("");
+    setShowCreate(false);
+    props.notify(isAr ? "تم إنشاء قائمة التشغيل" : "Playlist created");
+  };
 
   const metaMap: Record<
     string,
@@ -237,39 +257,99 @@ export default function LibraryPage(props: Props) {
     onDismiss: props.onDismiss,
     onChannel: props.onChannel,
     saved: props.isSaved(v.url.split("v=")[1]),
-    onSaveLater: () => props.onSaveLater(v.url.split("v=")[1]),
+    onSaveLater: () => props.onSaveLater(v.url.split("v=")[1], v),
   });
 
   // ---- Playlists overview ----
   if (normalized === "playlists") {
-    const lists = [
+    const systemLists = [
       {
         key: "watchLater",
         name: t("watchLater"),
         count: props.watchLater.length,
         thumb: idsToVideos(props.watchLater)[0]?.thumbnail,
+        type: "system",
       },
       {
         key: "liked",
         name: t("likedVideos"),
         count: props.liked.length,
         thumb: idsToVideos(props.liked)[0]?.thumbnail,
+        type: "system",
       },
     ];
+
+    const allLists = [
+      ...systemLists,
+      ...customPlaylists.map((p) => ({
+        key: p.id,
+        name: p.title,
+        count: p.videoIds.length,
+        thumb: p.thumbnail,
+        type: "custom",
+      })),
+    ];
+
     return (
       <div className="max-w-[1400px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6">
-        <h1 className="font-display font-black text-2xl mb-6 flex items-center gap-3">
-          <ListVideo className="w-7 h-7" /> {t("playlists")}
-        </h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="font-display font-black text-2xl flex items-center gap-3">
+            <ListVideo className="w-7 h-7" /> {t("playlists")}
+          </h1>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 h-9 px-4 rounded-full bg-yt-blue text-black font-bold text-sm active:scale-95 transition-transform"
+          >
+            <Plus className="w-4 h-4" />
+            {isAr ? "قائمة جديدة" : "New Playlist"}
+          </button>
+        </div>
+
+        {showCreate && (
+          <div className="mb-8 p-4 rounded-xl bg-yt-surface border border-yt-border animate-in slide-in-from-top-4">
+            <h3 className="font-bold mb-3">{isAr ? "إنشاء قائمة تشغيل جديدة" : "Create New Playlist"}</h3>
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                type="text"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder={isAr ? "عنوان القائمة..." : "Playlist title..."}
+                className="flex-1 bg-yt-bg border border-yt-border rounded-lg px-3 py-2 outline-none focus:border-yt-blue transition-colors"
+                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              />
+              <button
+                onClick={handleCreate}
+                disabled={!newTitle.trim()}
+                className="bg-white text-black px-4 py-2 rounded-lg font-bold disabled:opacity-50"
+              >
+                {isAr ? "إنشاء" : "Create"}
+              </button>
+              <button
+                onClick={() => setShowCreate(false)}
+                className="bg-yt-raised px-4 py-2 rounded-lg font-bold"
+              >
+                {isAr ? "إلغاء" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
-          {lists.map((pl, i) => (
+          {allLists.map((pl, i) => (
             <button
-              key={pl.name}
+              key={pl.key}
               className="group text-start rise"
               style={{ animationDelay: `${i * 60}ms` }}
-              onClick={() => window.dispatchEvent(new CustomEvent("yt:nav", { detail: pl.name }))}
+              onClick={() => {
+                if (pl.type === "system") {
+                  window.dispatchEvent(new CustomEvent("yt:nav", { detail: pl.name }));
+                } else {
+                  window.dispatchEvent(new CustomEvent("yt:nav", { detail: `playlist:${pl.key}` }));
+                }
+              }}
             >
-              <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised">
+              <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised shadow-lg group-hover:shadow-yt-blue/10 transition-shadow">
                 {pl.thumb ? (
                   <img
                     src={pl.thumb}
@@ -278,16 +358,20 @@ export default function LibraryPage(props: Props) {
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   />
                 ) : (
-                  <div className="w-full h-full bg-yt-surface" />
+                  <div className="w-full h-full bg-yt-surface flex items-center justify-center">
+                    <ListVideo className="w-10 h-10 text-yt-sub opacity-20" />
+                  </div>
                 )}
-                <div className="absolute inset-y-0 end-0 w-2/5 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-white">
+                <div className="absolute inset-y-0 end-0 w-2/5 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-white border-s border-white/10">
                   <ListVideo className="w-5 h-5 mb-1" />
                   <span className="font-bold">{pl.count}</span>
                 </div>
               </div>
-              <h3 className="font-medium text-[15px] mt-2">{pl.name}</h3>
+              <h3 className="font-bold text-[15px] mt-3 group-hover:text-yt-blue transition-colors line-clamp-1">
+                {pl.name}
+              </h3>
               <p className="text-[13px] text-yt-sub mt-0.5">
-                {isAr ? "عرض القائمة" : "View Playlist"}
+                {pl.type === "system" ? (isAr ? "نظام" : "System") : isAr ? "قائمة مخصصة" : "Custom Playlist"}
               </p>
             </button>
           ))}

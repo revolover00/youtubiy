@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { BadgeCheck, Bell, Search, Share2 } from "lucide-react";
 import { getChannel } from "../lib/api";
 import { fmtViews, videoIdFromUrl } from "../lib/format";
 import type { ChannelData, PipedVideo } from "../lib/types";
 import { Avatar, ErrorState, SkeletonGrid, VideoCard } from "./Feed";
 import { ShortsIcon } from "./icons";
+import { useLanguage } from "../lib/i18n";
 
 interface Props {
   channelId: string;
@@ -14,10 +15,8 @@ interface Props {
   onToggleSub: (m: { channelId: string; name: string; avatar?: string }) => void;
   onDismiss: (id: string) => void;
   onOpenShort: (items: PipedVideo[], index: number) => void;
+  onAddToPlaylist: (v: PipedVideo) => void;
 }
-
-const TABS = ["الرئيسية", "الفيديوهات", "شورتس", "قوائم التشغيل", "عن القناة"] as const;
-type Tab = (typeof TABS)[number];
 
 export default function ChannelPage({
   channelId,
@@ -27,8 +26,35 @@ export default function ChannelPage({
   onToggleSub,
   onDismiss,
   onOpenShort,
+  onAddToPlaylist,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("الرئيسية");
+  const { t, isAr } = useLanguage();
+  const TABS = useMemo(
+    () =>
+      isAr
+        ? ([
+            { id: "home", label: "الرئيسية" },
+            { id: "videos", label: "الفيديوهات" },
+            { id: "shorts", label: "شورتس" },
+            { id: "playlists", label: "قوائم التشغيل" },
+            { id: "about", label: "عن القناة" },
+          ] as const)
+        : ([
+            { id: "home", label: "Home" },
+            { id: "videos", label: "Videos" },
+            { id: "shorts", label: "Shorts" },
+            { id: "playlists", label: "Playlists" },
+            { id: "about", label: "About" },
+          ] as const),
+    [isAr],
+  );
+  const [tabId, setTabId] = useState<string>("home");
+
+  useEffect(() => {
+    // Keep tab selected when switching language
+    const current = TABS.find((t) => t.id === tabId);
+    if (!current) setTabId("home");
+  }, [TABS, tabId]);
   const [data, setData] = useState<ChannelData | null>(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -70,7 +96,8 @@ export default function ChannelPage({
     notify,
     onDismiss,
     onChannel: () => {},
-    onSaveLater: () => notify("تم الحفظ للمشاهدة لاحقاً ⏰"),
+    onSaveLater: () => notify(isAr ? "تم الحفظ للمشاهدة لاحقاً ⏰" : "Saved to Watch Later ⏰"),
+    onAddToPlaylist,
   });
 
   return (
@@ -143,15 +170,15 @@ export default function ChannelPage({
         <div className="flex gap-1 overflow-x-auto no-scrollbar">
           {TABS.map((t) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={t.id}
+              onClick={() => setTabId(t.id)}
               className={`shrink-0 px-4 py-3 text-sm font-bold border-b-2 -mb-px transition-colors ${
-                tab === t
+                tabId === t.id
                   ? "border-yt-text text-yt-text"
                   : "border-transparent text-yt-sub hover:text-yt-text"
               }`}
             >
-              {t}
+              {t.label}
             </button>
           ))}
           <button className="shrink-0 px-3 py-3 text-yt-sub" aria-label="بحث في القناة">
@@ -161,7 +188,7 @@ export default function ChannelPage({
       </div>
 
       <div className="px-3 sm:px-6 mt-6">
-        {tab === "الرئيسية" && (
+        {tabId === "home" && (
           <div className="space-y-8">
             {featured && (
               <div className="rise flex flex-col md:flex-row gap-4 md:gap-6 pb-6 border-b border-yt-border">
@@ -179,12 +206,12 @@ export default function ChannelPage({
                   </div>
                 </button>
                 <div className="md:pt-2">
-                  <span className="text-xs text-yt-sub">فيديو مميّز</span>
+                  <span className="text-xs text-yt-sub">{isAr ? "فيديو مميّز" : "Featured Video"}</span>
                   <h2 className="font-display font-bold text-lg sm:text-xl mt-1 leading-snug">
                     {featured.title}
                   </h2>
                   <p className="text-sm text-yt-sub mt-2">
-                    {fmtViews(featured.views) && `${fmtViews(featured.views)} مشاهدة`}
+                    {fmtViews(featured.views) && `${fmtViews(featured.views)} ${isAr ? "مشاهدة" : "views"}`}
                   </p>
                   <p className="text-sm text-yt-text/80 mt-3 leading-relaxed line-clamp-3">
                     {data.description}
@@ -196,7 +223,7 @@ export default function ChannelPage({
               <div className="pt-4 border-t border-yt-border">
                 <div className="flex items-center gap-2 mb-4">
                   <ShortsIcon className="w-5 h-5 text-yt-red" />
-                  <h3 className="font-display font-bold text-lg">شورتس</h3>
+                  <h3 className="font-display font-bold text-lg">{isAr ? "شورتس" : "Shorts"}</h3>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                   {shorts.slice(0, 6).map((s, i) => (
@@ -231,7 +258,7 @@ export default function ChannelPage({
           </div>
         )}
 
-        {tab === "الفيديوهات" && (
+        {tabId === "videos" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
             {videos.map((v, i) => (
               <VideoCard key={videoIdFromUrl(v.url)} {...cardProps(v, i)} />
@@ -239,7 +266,7 @@ export default function ChannelPage({
           </div>
         )}
 
-        {tab === "شورتس" &&
+        {tabId === "shorts" &&
           (shorts.length ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {shorts.map((s, i) => (
@@ -266,38 +293,38 @@ export default function ChannelPage({
             </div>
           ) : (
             <div className="py-20 text-center text-yt-sub text-sm">
-              لا توجد مقاطع قصيرة في هذه القناة
+              {isAr ? "لا توجد مقاطع قصيرة في هذه القناة" : "No shorts available for this channel"}
             </div>
           ))}
 
-        {tab === "قوائم التشغيل" && (
+        {tabId === "playlists" && (
           <div className="py-20 text-center text-yt-sub text-sm">
-            قوائم التشغيل غير متاحة عبر واجهة Piped البرمجية حالياً
+            {isAr ? "قوائم التشغيل غير متاحة حالياً" : "Playlists are not available currently"}
           </div>
         )}
 
-        {tab === "عن القناة" && (
+        {tabId === "about" && (
           <div className="max-w-2xl rise">
-            <h3 className="font-display font-bold text-lg mb-3">الوصف</h3>
+            <h3 className="font-display font-bold text-lg mb-3">{isAr ? "الوصف" : "Description"}</h3>
             <p className="text-sm leading-relaxed text-yt-text/90 whitespace-pre-line">
-              {data.description || "لا يوجد وصف."}
+              {data.description || (isAr ? "لا يوجد وصف." : "No description.")}
             </p>
             <hr className="border-yt-border my-6" />
-            <h3 className="font-display font-bold text-lg mb-3">التفاصيل</h3>
+            <h3 className="font-display font-bold text-lg mb-3">{isAr ? "التفاصيل" : "Details"}</h3>
             <ul className="space-y-2.5 text-sm text-yt-sub">
               {data.subscriberText ? (
                 <li>👥 {data.subscriberText}</li>
               ) : data.subscriberCount != null ? (
-                <li>👥 {fmtViews(data.subscriberCount)} مشترك</li>
+                <li>👥 {fmtViews(data.subscriberCount)} {isAr ? "مشترك" : "subscribers"}</li>
               ) : null}
               {data.videoCountText ? (
                 <li>🎬 {data.videoCountText}</li>
               ) : data.videoCount != null ? (
-                <li>🎬 {fmtViews(data.videoCount)} فيديو</li>
+                <li>🎬 {fmtViews(data.videoCount)} {isAr ? "فيديو" : "videos"}</li>
               ) : (
-                <li>🎬 {videos.length}+ فيديو منشور</li>
+                <li>🎬 {videos.length}+ {isAr ? "فيديو منشور" : "videos published"}</li>
               )}
-              {shorts.length > 0 && <li>⚡ {shorts.length} مقطع شورتس</li>}
+              {shorts.length > 0 && <li>⚡ {shorts.length} {isAr ? "مقطع شورتس" : "shorts"}</li>}
               <li>🆔 {channelId}</li>
             </ul>
           </div>

@@ -19,6 +19,7 @@ import ShortsViewer from "./components/ShortsViewer";
 import ChannelPage from "./components/ChannelPage";
 import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
 import PlaylistPage from "./components/PlaylistPage";
+import PlaylistDialog from "./components/PlaylistDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import { YouTubeImportModal } from "./components/YouTubeImportModal";
 import { YouTubeSyncBanner } from "./components/YouTubeSyncBanner";
@@ -53,6 +54,7 @@ import {
   fetchUserLiked,
   getBackgroundPlay,
   setBackgroundPlay,
+  getCustomPlaylists,
 } from "./lib/store";
 import { useAuth } from "./lib/AuthContext";
 import type {
@@ -61,6 +63,7 @@ import type {
   Subscription,
   SearchChannel,
   SearchPlaylist,
+  UserPlaylist,
 } from "./lib/types";
 import { useLanguage } from "./lib/i18n";
 import { useAppStore, appStore, type RouteState } from "./lib/appStore";
@@ -117,6 +120,8 @@ export default function App() {
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [playlistDialogOpen, setPlaylistDialogOpen] = useState(false);
+  const [playlistTargetVideo, setPlaylistTargetVideo] = useState<PipedVideo | null>(null);
   const [hidden, setHidden] = useState<string[]>([]);
   const [shorts, setShorts] = useState<{ items: PipedVideo[]; index: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -124,6 +129,7 @@ export default function App() {
 
   // persisted state
   const [subs, setSubs] = useState<Subscription[]>([]);
+  const [customPlaylists, setCustomPlaylists] = useState<UserPlaylist[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [watchLater, setWatchLaterState] = useState<string[]>([]);
   const [liked, setLikedState] = useState<string[]>([]);
@@ -154,6 +160,9 @@ export default function App() {
       .catch(() => {});
     getHistory()
       .then(setHistory)
+      .catch(() => {});
+    getCustomPlaylists()
+      .then(setCustomPlaylists)
       .catch(() => {});
     fetchUserWatchLater()
       .then(setWatchLaterState)
@@ -187,7 +196,80 @@ export default function App() {
     return () => window.removeEventListener("yt:subscriptions-synced", handleSync);
   }, [isAr, notify]);
 
-  // feed loading: personalized / topic / search
+  // URL Sync and Page Title management
+  useEffect(() => {
+    const brand = "youtubiy";
+    let title = brand;
+
+    if (route.type === "watch" && route.video.title) {
+      title = route.video.title;
+    } else if (route.type === "channel") {
+      title = isAr ? "قناة" : "Channel";
+    } else if (route.type === "playlist") {
+      title = isAr ? "قائمة تشغيل" : "Playlist";
+    } else if (route.type === "subs") {
+      title = t("subscriptions");
+    } else if (route.type === "library") {
+      title = route.key;
+    }
+
+    document.title = title === brand ? brand : `${title} - ${brand}`;
+
+    // Sync state to URL
+    if (route.type === "watch") {
+      const vid = videoIdFromUrl(route.video.url);
+      if (vid && urlVideoId !== vid) {
+        void routerNav({ to: "/watch", search: { v: vid } });
+      }
+    } else if (route.type === "channel") {
+      const id = route.id;
+      if (id && (pathname !== "/channel" || urlSearch?.["id"] !== id)) {
+        void routerNav({ to: "/channel", search: { id } });
+      }
+    } else if (route.type === "playlist") {
+      const id = route.id;
+      if (id && (pathname !== "/playlist" || urlSearch?.["id"] !== id)) {
+        void routerNav({ to: "/playlist", search: { id } });
+      }
+    } else if (searchQ.trim() && pathname !== "/search") {
+      if (urlSearch?.["q"] !== searchQ.trim()) {
+        void routerNav({ to: "/search", search: { q: searchQ.trim() } });
+      }
+    } else if (route.type === "home") {
+      if (pathname !== "/") void routerNav({ to: "/" });
+    } else if (route.type === "subs") {
+      if (pathname !== "/subscriptions") void routerNav({ to: "/subscriptions" });
+    } else if (route.type === "library") {
+      if (pathname !== "/library") void routerNav({ to: "/library", search: { k: route.key } });
+    }
+  }, [route, isAr, t, pathname, urlVideoId, routerNav]);
+
+  // Initial URL -> State sync
+  useEffect(() => {
+    if (pathname === "/watch" && urlVideoId) {
+      // Handled by the other useEffect
+    } else if (pathname === "/subscriptions") {
+      setRoute({ type: "subs" });
+    } else if (pathname === "/library") {
+      const key = urlSearch?.["k"] as LibraryKey;
+      if (key) setRoute({ type: "library", key });
+    } else if (pathname === "/shorts") {
+      setRoute({ type: "home" });
+      requestAnimationFrame(() =>
+        document.getElementById("shorts-shelf")?.scrollIntoView({ behavior: "smooth" }),
+      );
+    } else if (pathname === "/channel") {
+      const id = urlSearch?.["id"] as string;
+      if (id) setRoute({ type: "channel", id });
+    } else if (pathname === "/playlist") {
+      const id = urlSearch?.["id"] as string;
+      if (id) setRoute({ type: "playlist", id });
+    } else if (pathname === "/search") {
+      const q = urlSearch?.["q"] as string;
+      if (q) setSearchQ(q);
+    }
+  }, [pathname, urlVideoId, urlSearch, setRoute]);
+
   const isFeedMode = route.type === "home" || route.type === "subs";
   const isSearchActive = searchQ.trim().length > 0;
 
@@ -290,7 +372,15 @@ export default function App() {
     return () => io.disconnect();
   }, [hasMore, isFeedMode, loadMore, feed]);
 
-  const toggleLater = (id: string) => {
+  const toggleLater = (id: string, video?: PipedVideo) => {
+    if (video) {
+      setMeta(id, {
+        title: video.title,
+        uploaderName: video.uploaderName,
+        thumbnail: video.thumbnail,
+        duration: video.duration,
+      });
+    }
     setWatchLaterState((w) => {
       const has = w.includes(id);
       const next = has ? w.filter((x) => x !== id) : [...w, id];
@@ -489,7 +579,7 @@ export default function App() {
     if (!id) return;
     setRoute({ type: "channel", id });
     setActiveNav("");
-    if (pathname !== "/") void routerNav({ to: "/" });
+    void routerNav({ to: "/channel", search: { id } });
     window.scrollTo({ top: 0 });
   };
 
@@ -497,7 +587,7 @@ export default function App() {
     if (!id) return;
     setRoute({ type: "playlist", id });
     setActiveNav("");
-    if (pathname !== "/") void routerNav({ to: "/" });
+    void routerNav({ to: "/playlist", search: { id } });
     window.scrollTo({ top: 0 });
   };
 
@@ -505,16 +595,31 @@ export default function App() {
   useEffect(() => {
     const onOpen = (e: Event) => openVideo((e as CustomEvent<PipedVideo>).detail);
     const onNav = (e: Event) => navigate((e as CustomEvent<LibraryKey>).detail);
+    const onAddToPlaylist = (e: Event) => {
+      setPlaylistTargetVideo((e as CustomEvent<PipedVideo>).detail);
+      setPlaylistDialogOpen(true);
+    };
     window.addEventListener("yt:open", onOpen);
     window.addEventListener("yt:nav", onNav);
+    window.addEventListener("yt:add-to-playlist", onAddToPlaylist);
+    const onPlaylistUpdate = () => {
+      getCustomPlaylists().then(setCustomPlaylists).catch(() => {});
+    };
+    window.addEventListener("yt:playlists-updated", onPlaylistUpdate);
     return () => {
       window.removeEventListener("yt:open", onOpen);
       window.removeEventListener("yt:nav", onNav);
+      window.removeEventListener("yt:add-to-playlist", onAddToPlaylist);
+      window.removeEventListener("yt:playlists-updated", onPlaylistUpdate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const navigate = (label: string) => {
+    if (label.startsWith("playlist:")) {
+      openPlaylist(label.slice(9));
+      return;
+    }
     if (label.startsWith("channel:")) {
       if (route.type === "watch") {
         const id = videoIdFromUrl(route.video.url);
@@ -540,22 +645,31 @@ export default function App() {
       appStore.setMiniplayer({ video: route.video, time });
     }
     setActiveNav(label);
-    if (pathname !== "/") void routerNav({ to: "/" });
+    
     if (label === "home" || label === t("home")) {
+      setSearchQ("");
+      void routerNav({ to: "/" });
       goHome();
     } else if (label === "Shorts" || label === t("shorts")) {
+      setSearchQ("");
+      void routerNav({ to: "/shorts" });
       setRoute({ type: "home" });
       setChip("All");
       requestAnimationFrame(() =>
         document.getElementById("shorts-shelf")?.scrollIntoView({ behavior: "smooth" }),
       );
     } else if (label === "subscriptions" || label === t("subscriptions")) {
+      setSearchQ("");
+      void routerNav({ to: "/subscriptions" });
       setRoute({ type: "subs" });
       window.scrollTo({ top: 0 });
     } else if ((LIBRARY_KEYS as string[]).includes(label)) {
+      setSearchQ("");
+      void routerNav({ to: "/library", search: { k: label } });
       setRoute({ type: "library", key: label as LibraryKey });
       window.scrollTo({ top: 0 });
     } else {
+      if (pathname !== "/") void routerNav({ to: "/" });
       notify(`«${label}»`);
     }
   };
@@ -702,8 +816,12 @@ export default function App() {
       notify,
       onChannel: openChannel,
       saved: watchLater.includes(id),
-      onSaveLater: () => toggleLater(id),
+      onSaveLater: () => toggleLater(id, v),
       onDismiss: (vid: string) => setHidden((h) => [...h, vid]),
+      onAddToPlaylist: () => {
+        setPlaylistTargetVideo(v);
+        setPlaylistDialogOpen(true);
+      },
     };
   };
 
@@ -777,6 +895,7 @@ export default function App() {
         pushable={!inWatch}
         active={activeNav}
         subs={subs}
+        customPlaylists={customPlaylists}
         onNavigate={navigate}
         onHome={goHome}
         mobileOpen={drawer}
@@ -799,7 +918,11 @@ export default function App() {
             liked={liked.includes(videoIdFromUrl(route.video.url))}
             onToggleLike={() => toggleLike(videoIdFromUrl(route.video.url))}
             saved={watchLater.includes(videoIdFromUrl(route.video.url))}
-            onToggleSave={() => toggleLater(videoIdFromUrl(route.video.url))}
+            onToggleSave={() => toggleLater(videoIdFromUrl(route.video.url), route.video)}
+            onAddToPlaylist={(v) => {
+              setPlaylistTargetVideo(v);
+              setPlaylistDialogOpen(true);
+            }}
             isSubscribed={(cid) => subs.some((s) => s.channel_id === cid)}
             onToggleSub={(m) => doToggleSub(m)}
             onMinimize={minimizeVideo}
@@ -833,6 +956,10 @@ export default function App() {
             onDismiss={(id) => setHidden((h) => [...h, id])}
             isSaved={(id) => watchLater.includes(id)}
             onSaveLater={toggleLater}
+            onAddToPlaylist={(v) => {
+              setPlaylistTargetVideo(v);
+              setPlaylistDialogOpen(true);
+            }}
           />
         )}
 
@@ -850,6 +977,7 @@ export default function App() {
               setWatchLaterState((w) => {
                 const next = w.filter((x) => x !== id);
                 setWatchLater(next);
+                void syncWatchLaterToCloud(id, false);
                 return next;
               });
             }}
@@ -859,6 +987,10 @@ export default function App() {
             }}
             isSaved={(id) => watchLater.includes(id)}
             onSaveLater={toggleLater}
+            onAddToPlaylist={(v) => {
+              setPlaylistTargetVideo(v);
+              setPlaylistDialogOpen(true);
+            }}
           />
         )}
 
@@ -1096,10 +1228,19 @@ export default function App() {
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onClearAllHistory={() => {
+        notify={notify}
+        onHistoryCleared={() => {
           setHistory([]);
           clearHistory();
         }}
+      />
+
+      {/* Playlist Dialog */}
+      <PlaylistDialog
+        open={playlistDialogOpen}
+        onClose={() => setPlaylistDialogOpen(false)}
+        video={playlistTargetVideo}
+        notify={notify}
       />
 
       {/* Shorts full-screen viewer */}

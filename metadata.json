@@ -1,6 +1,6 @@
 {
-  "name": "YouTube",
-  "description": "YouTube video streaming, search, playlists, and channels interface",
+  "name": "youtubiy",
+  "description": "Youtubiy - Watch, discover, and organize your favorite videos with a premium interface.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

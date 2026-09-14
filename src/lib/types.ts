@@ -103,6 +103,16 @@ export interface SearchPlaylist {
   firstVideoId?: string;
 }
 
+export interface UserPlaylist {
+  id: string;
+  title: string;
+  description?: string;
+  videoIds: string[];
+  thumbnail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PlaylistData {
   id: string;
   title: string;

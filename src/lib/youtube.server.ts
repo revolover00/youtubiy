@@ -50,15 +50,16 @@ async function innertube<T = Json>(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-function collect(node: Json, key: string, out: Json[] = []): Json[] {
-  if (!node || typeof node !== "object") return out;
+function collect(node: Json, key: string, out: Json[] = [], depth = 0): Json[] {
+  // Prevent infinite loops from recursive structures (Youtubei sometimes has them)
+  if (!node || typeof node !== "object" || depth > 20) return out;
   if (Array.isArray(node)) {
-    for (const item of node) collect(item, key, out);
+    for (const item of node) collect(item, key, out, depth + 1);
     return out;
   }
   for (const [k, v] of Object.entries(node)) {
     if (k === key) out.push(v);
-    else collect(v, key, out);
+    else collect(v, key, out, depth + 1);
   }
   return out;
 }
@@ -66,9 +67,17 @@ function collect(node: Json, key: string, out: Json[] = []): Json[] {
 function text(node: Json): string {
   if (!node) return "";
   if (typeof node === "string") return node;
-  if (typeof node.simpleText === "string") return node.simpleText;
-  if (typeof node.content === "string") return node.content;
-  if (Array.isArray(node.runs)) return node.runs.map((r: Json) => r?.text ?? "").join("");
+  if (node.simpleText && typeof node.simpleText === "string") return node.simpleText;
+  if (node.content && typeof node.content === "string") return node.content;
+  if (Array.isArray(node.runs)) {
+    return node.runs
+      .map((r: Json) => {
+        if (!r) return "";
+        if (typeof r === "string") return r;
+        return r.text ?? "";
+      })
+      .join("");
+  }
   return "";
 }
 
@@ -126,12 +135,17 @@ function fromVideoRenderer(r: Json): PipedVideo | null {
     collect(byline, "browseEndpoint")[0]?.browseId ??
     collect(r, "browseEndpoint")[0]?.browseId ??
     "";
+  
+  // Robust thumbnail selection
+  const thumbs = r.thumbnail?.thumbnails ?? [];
+  const thumbnail = thumbs.length > 0 ? (thumbs.at(-1)?.url || thumbFor(id)) : thumbFor(id);
+
   return {
     url: `/watch?v=${id}`,
     type: "stream",
     title,
-    thumbnail: r.thumbnail?.thumbnails?.at(-1)?.url ?? thumbFor(id),
-    uploaderName: text(byline),
+    thumbnail,
+    uploaderName: text(byline) || "YouTube",
     uploaderUrl: channelId ? `/channel/${channelId}` : undefined,
     uploaderAvatar: collect(r, "channelThumbnailSupportedRenderers")[0]
       ? collect(r, "thumbnails")[1]?.[0]?.url

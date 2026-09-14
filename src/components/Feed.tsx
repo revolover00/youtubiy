@@ -137,16 +137,18 @@ function CardMenu({
   onDismiss,
   notify,
   onSaveLater,
+  onAddToPlaylist,
   saved,
   videoUrl,
 }: {
   onDismiss: () => void;
   notify: (m: string) => void;
   onSaveLater: () => void;
+  onAddToPlaylist?: () => void;
   saved: boolean;
   videoUrl?: string;
 }) {
-  const { t, dir } = useLanguage();
+  const { t, dir, isAr } = useLanguage();
   const [open, setOpen] = useState(false);
 
   const items = [
@@ -154,6 +156,11 @@ function CardMenu({
       icon: Clock,
       label: saved ? t("removeFromWatchLater") : t("saveToWatchLater"),
       act: onSaveLater,
+    },
+    {
+      icon: ListPlus,
+      label: isAr ? "إضافة إلى قائمة تشغيل" : "Add to playlist",
+      act: () => onAddToPlaylist?.(),
     },
     {
       icon: ListPlus,
@@ -238,6 +245,7 @@ export function VideoCard({
   notify,
   onChannel,
   onSaveLater,
+  onAddToPlaylist,
   saved,
   layout = "grid",
 }: {
@@ -248,6 +256,7 @@ export function VideoCard({
   notify: (m: string) => void;
   onChannel?: (channelId: string, name: string) => void;
   onSaveLater?: () => void;
+  onAddToPlaylist?: () => void;
   saved?: boolean;
   layout?: "grid" | "list";
 }) {
@@ -260,6 +269,7 @@ export function VideoCard({
       saved={!!saved}
       videoUrl={video.url}
       onSaveLater={() => onSaveLater?.()}
+      onAddToPlaylist={() => onAddToPlaylist?.()}
       onDismiss={() => {
         onDismiss(id);
         notify(t("notInterested"));
