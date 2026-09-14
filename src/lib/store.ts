@@ -10,7 +10,97 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { auth, db, handleFirestoreError, OperationType } from "./firebase";
-import type { HistoryRow, Subscription, VideoMeta, UserPlaylist } from "./types";
+import type {
+  HistoryRow,
+  Subscription,
+  VideoMeta,
+  UserPlaylist,
+  AppNotification,
+} from "./types";
+
+/* ------------------------------------------------------------------ */
+/* Notifications: Firestore + Local Cache                             */
+/* ------------------------------------------------------------------ */
+
+export async function getNotifications(): Promise<AppNotification[]> {
+  const local = read<AppNotification[]>("yt.notifs", []);
+  const currentUser = auth.currentUser;
+  if (!currentUser) return local;
+
+  try {
+    const q = query(
+      collection(db, "users", currentUser.uid, "notifications"),
+      orderBy("created_at", "desc"),
+    );
+    const snap = await getDocs(q);
+    const remote: AppNotification[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      remote.push({
+        id: d.id,
+        video_id: data.video_id,
+        title: data.title,
+        thumbnail: data.thumbnail,
+        channel_id: data.channel_id,
+        channel_name: data.channel_name,
+        channel_avatar: data.channel_avatar,
+        created_at: data.created_at,
+        read: data.read || false,
+      });
+    });
+
+    if (remote.length > 0) {
+      write("yt.notifs", remote);
+      return remote;
+    }
+    return local;
+  } catch (error) {
+    return local;
+  }
+}
+
+export async function markNotificationAsRead(id: string): Promise<void> {
+  const local = read<AppNotification[]>("yt.notifs", []);
+  const found = local.find((n) => n.id === id);
+  if (found) {
+    found.read = true;
+    write("yt.notifs", local);
+    window.dispatchEvent(new CustomEvent("yt:notifs-updated"));
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "notifications", id);
+    await updateDoc(docRef, { read: true });
+  } catch (error) {
+    // Ignore update error
+  }
+}
+
+export async function addNotification(notif: Omit<AppNotification, "id" | "read">): Promise<void> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  const id = `notif_${notif.video_id}`;
+  const fullNotif: AppNotification = { ...notif, id, read: false };
+
+  // Local update
+  const local = read<AppNotification[]>("yt.notifs", []);
+  if (local.some((n) => n.id === id)) return; // Already exists
+
+  local.unshift(fullNotif);
+  write("yt.notifs", local.slice(0, 50));
+  window.dispatchEvent(new CustomEvent("yt:notifs-updated"));
+
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "notifications", id);
+    await setDoc(docRef, { ...notif, read: false });
+  } catch (error) {
+    // Ignore save error
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Local persistence (fallback and offline cache)                     */

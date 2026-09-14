@@ -129,3 +129,15 @@ export interface PlaylistData {
   description?: string;
   videos: PipedVideo[];
 }
+
+export interface AppNotification {
+  id: string;
+  video_id: string;
+  title: string;
+  thumbnail: string;
+  channel_id: string;
+  channel_name: string;
+  channel_avatar?: string;
+  created_at: string;
+  read: boolean;
+}

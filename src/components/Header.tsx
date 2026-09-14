@@ -25,10 +25,15 @@ import {
   Sparkles,
 } from "lucide-react";
 import { LogoIcon } from "./icons";
-import { suggestions, getChannel } from "../lib/api";
-import { getSubscriptions } from "../lib/store";
+import { suggestions } from "../lib/api";
+import {
+  getSubscriptions,
+  getNotifications,
+  markNotificationAsRead,
+} from "../lib/store";
+import { refreshNotifications } from "../lib/notifications";
 import { fmtDuration } from "../lib/format";
-import type { PipedVideo } from "../lib/types";
+import type { PipedVideo, AppNotification } from "../lib/types";
 import { useLanguage } from "../lib/i18n";
 import { useAuth } from "../lib/AuthContext";
 import { YouTubeImportModal } from "./YouTubeImportModal";
@@ -70,7 +75,8 @@ export default function Header({
   const [sugg, setSugg] = useState<string[]>([]);
   const [active, setActive] = useState(-1);
   const [listening, setListening] = useState(false);
-  const [notifs, setNotifs] = useState<Notif[] | null>(null);
+  const [notifs, setNotifs] = useState<AppNotification[] | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [notifsErr, setNotifsErr] = useState(false);
   const blurTimer = useRef<number | null>(null);
   const suggTimer = useRef<number | null>(null);
@@ -133,6 +139,32 @@ export default function Header({
     }
   };
 
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const list = await getNotifications();
+        setNotifs(list);
+        setUnreadCount(list.filter((n) => !n.read).length);
+      } catch (err) {
+        setNotifsErr(true);
+      }
+    };
+    load();
+
+    const handleUpdate = () => load();
+    window.addEventListener("yt:notifs-updated", handleUpdate);
+    return () => window.removeEventListener("yt:notifs-updated", handleUpdate);
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      // Initial refresh then every 15 mins
+      refreshNotifications();
+      const timer = setInterval(refreshNotifications, 15 * 60 * 1000);
+      return () => clearInterval(timer);
+    }
+  }, [user]);
+
   const submit = (q: string) => {
     const trimmed = q.trim();
     if (!trimmed) return;
@@ -166,31 +198,8 @@ export default function Header({
     rec.start();
   };
 
-  const openBell = async () => {
+  const openBell = () => {
     setPopover(popover === "bell" ? null : "bell");
-    if (popover === "bell" || notifs !== null) return;
-    try {
-      const subs = await getSubscriptions();
-      if (!subs.length) {
-        setNotifs([]);
-        return;
-      }
-      const results = await Promise.allSettled(
-        subs.slice(0, 4).map(async (s) => {
-          const ch = await getChannel(s.channel_id);
-          return { ch, sub: s };
-        }),
-      );
-      const list: Notif[] = [];
-      for (const r of results) {
-        if (r.status !== "fulfilled") continue;
-        const latest = (r.value.ch.relatedStreams || [])[0];
-        if (latest) list.push({ video: latest, channel: r.value.sub.channel_name });
-      }
-      setNotifs(list);
-    } catch {
-      setNotifsErr(true);
-    }
   };
 
   const showSuggestions = focused && sugg.length > 0 && !inWatch;
@@ -356,9 +365,9 @@ export default function Header({
               aria-label={t("notifications")}
             >
               <Bell className="w-5 h-5" />
-              {notifs && notifs.length > 0 && (
-                <span className="absolute top-1 end-1 min-w-4 h-4 px-0.5 rounded-full bg-yt-red text-[10px] font-bold grid place-items-center">
-                  {notifs.length}
+              {unreadCount > 0 && (
+                <span className="absolute top-1 end-1 min-w-4 h-4 px-1 rounded-full bg-yt-red text-[10px] font-bold grid place-items-center">
+                  {unreadCount > 9 ? "+9" : unreadCount}
                 </span>
               )}
             </button>
@@ -367,7 +376,7 @@ export default function Header({
                 <div className="fixed inset-0 z-40" onClick={() => setPopover(null)} />
                 <div className="dropdown-in absolute end-0 top-12 z-50 w-[340px] max-w-[90vw] rounded-xl bg-yt-raised border border-yt-border shadow-2xl shadow-black/60 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-yt-border">
-                    <span className="font-display font-bold">{t("notifications")}</span>
+                    <span className="font-display font-bold text-[15px]">{t("notifications")}</span>
                     <button
                       className="w-8 h-8 rounded-full hover:bg-yt-surface grid place-items-center"
                       aria-label="More"
@@ -375,47 +384,74 @@ export default function Header({
                       <MoreVertical className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="max-h-96 overflow-y-auto">
+                  <div className="max-h-96 overflow-y-auto custom-scrollbar">
                     {notifs === null && (
                       <div className="py-10 grid place-items-center">
                         <Loader2 className="w-6 h-6 animate-spin text-yt-sub" />
                       </div>
                     )}
                     {notifsErr && (
-                      <p className="px-4 py-6 text-sm text-yt-sub text-center">
+                      <p className="px-4 py-8 text-sm text-yt-sub text-center leading-relaxed">
                         {t("notifsError")}
                       </p>
                     )}
                     {notifs && notifs.length === 0 && (
-                      <p className="px-4 py-6 text-sm text-yt-sub text-center">
-                        {t("notifsEmpty")}
+                      <p className="px-4 py-12 text-sm text-yt-sub text-center leading-relaxed">
+                        {isAr ? "لا توجد إشعارات جديدة من اشتراكاتك" : "No new notifications from your subscriptions"}
                       </p>
                     )}
                     {notifs?.map((n) => (
                       <button
-                        key={n.video.url}
+                        key={n.id}
                         onClick={() => {
                           setPopover(null);
+                          markNotificationAsRead(n.id);
                           onSearch("");
-                          window.dispatchEvent(new CustomEvent("yt:open", { detail: n.video }));
+                          // Reconstruct PipedVideo from notification data
+                          const video: PipedVideo = {
+                            url: `/watch?v=${n.video_id}`,
+                            title: n.title,
+                            thumbnail: n.thumbnail,
+                            uploaderName: n.channel_name,
+                            uploaderUrl: `/channel/${n.channel_id}`,
+                            duration: 0, // Not stored in notif
+                          };
+                          window.dispatchEvent(new CustomEvent("yt:open", { detail: video }));
                         }}
-                        className="w-full flex gap-3 px-4 py-3 hover:bg-yt-surface text-start"
+                        className={`w-full flex gap-3 px-4 py-3 hover:bg-yt-surface transition-colors text-start relative ${!n.read ? "bg-yt-blue/5" : ""}`}
                       >
-                        <span className="flex-1 min-w-0">
-                          <span className="block text-[13px] leading-snug line-clamp-2">
-                            <b>{n.channel}</b> {t("uploadedVideo")} {n.video.title}
-                          </span>
-                          <span className="block text-xs text-yt-sub mt-1">
-                            {fmtDuration(n.video.duration, lang)}
-                          </span>
-                        </span>
+                        <div className="shrink-0 pt-1">
+                          {n.channel_avatar ? (
+                            <img src={n.channel_avatar} alt="" className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-yt-surface grid place-items-center">
+                              <Bell className="w-4 h-4 text-yt-sub" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] leading-snug line-clamp-2">
+                            <span className="font-bold">{n.channel_name}</span> {isAr ? "نشر فيديو جديد:" : "uploaded:"} {n.title}
+                          </p>
+                          <p className="text-[11px] text-yt-sub mt-1">
+                            {new Date(n.created_at).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US", { 
+                              month: "short", 
+                              day: "numeric",
+                              hour: "numeric",
+                              minute: "numeric"
+                            })}
+                          </p>
+                        </div>
                         <img
-                          src={n.video.thumbnail}
+                          src={n.thumbnail}
                           alt=""
                           referrerPolicy="no-referrer"
-                          className="w-[76px] h-[42px] rounded-md object-cover shrink-0"
+                          className="w-[86px] h-[48px] rounded-md object-cover shrink-0"
                           loading="lazy"
                         />
+                        {!n.read && (
+                          <div className="absolute end-2 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-yt-blue" />
+                        )}
                       </button>
                     ))}
                   </div>
