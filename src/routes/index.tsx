@@ -1,7 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import App from "../App";
-
 const title = "يوتيوب بالعربية — مشاهدة وبحث بدون إعلانات مزعجة";
 const description =
   "تصفّح الرائج، ابحث عن أي فيديو، شاهد الشورتس وتابع قنواتك المفضّلة بواجهة عربية سريعة بالكامل.";
@@ -17,9 +15,5 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: Index,
+  component: () => null,
 });
-
-function Index() {
-  return <App />;
-}

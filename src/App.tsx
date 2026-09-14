@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Home,
@@ -10,6 +10,7 @@ import {
   X,
   UserRound,
   Loader2,
+  ChevronDown,
 } from "lucide-react";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
@@ -93,8 +94,6 @@ const LIBRARY_KEYS: LibraryKey[] = [
   "Playlists",
   "مقاطع الفيديو",
   "Your Videos",
-  "التنزيلات",
-  "Downloads",
   "الرائج",
   "Trending",
   "الموسيقى",
@@ -115,9 +114,15 @@ export default function App() {
   const urlSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
   const urlVideoId = pathname === "/watch" ? String(urlSearch?.["v"] ?? "") : "";
 
+  const urlSearchQ = typeof urlSearch?.["q"] === "string" ? urlSearch["q"] : undefined;
+  const urlSearchId = typeof urlSearch?.["id"] === "string" ? urlSearch["id"] : undefined;
+  const urlSearchK = typeof urlSearch?.["k"] === "string" ? urlSearch["k"] : undefined;
+  const urlSearchV = typeof urlSearch?.["v"] === "string" ? urlSearch["v"] : undefined;
+
   const { route } = useAppStore();
   const setRoute = appStore.setRoute;
 
+  const [mainDragY, setMainDragY] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [drawer, setDrawer] = useState(false);
   const [activeNav, setActiveNav] = useState("home");
@@ -241,52 +246,76 @@ export default function App() {
       }
     } else if (route.type === "channel") {
       const id = route.id;
-      if (id && (pathname !== "/channel" || urlSearch?.["id"] !== id)) {
+      if (id && (pathname !== "/channel" || urlSearchId !== id)) {
         void routerNav({ to: "/channel", search: { id } });
       }
     } else if (route.type === "playlist") {
       const id = route.id;
-      if (id && (pathname !== "/playlist" || urlSearch?.["id"] !== id)) {
+      if (id && (pathname !== "/playlist" || urlSearchId !== id)) {
         void routerNav({ to: "/playlist", search: { id } });
       }
     } else if (searchQ.trim() && pathname !== "/search") {
-      if (urlSearch?.["q"] !== searchQ.trim()) {
+      if (urlSearchQ !== searchQ.trim()) {
         void routerNav({ to: "/search", search: { q: searchQ.trim() } });
       }
     } else if (route.type === "home") {
-      if (pathname !== "/") void routerNav({ to: "/" });
+      if (pathname !== "/" && pathname !== "/search" && pathname !== "/shorts")
+        void routerNav({ to: "/" });
     } else if (route.type === "subs") {
       if (pathname !== "/subscriptions") void routerNav({ to: "/subscriptions" });
     } else if (route.type === "library") {
-      if (pathname !== "/library") void routerNav({ to: "/library", search: { k: route.key } });
+      if (pathname !== "/library" || urlSearchK !== route.key)
+        void routerNav({ to: "/library", search: { k: route.key } });
     }
-  }, [route, isAr, t, pathname, urlVideoId, routerNav]);
+  }, [
+    route,
+    isAr,
+    t,
+    pathname,
+    urlVideoId,
+    routerNav,
+    searchQ,
+    urlSearchId,
+    urlSearchQ,
+    urlSearchK,
+  ]);
 
   // Initial URL -> State sync
   useEffect(() => {
     if (pathname === "/watch" && urlVideoId) {
       // Handled by the other useEffect
     } else if (pathname === "/subscriptions") {
-      setRoute({ type: "subs" });
+      if (route.type !== "subs") setRoute({ type: "subs" });
     } else if (pathname === "/library") {
-      const key = urlSearch?.["k"] as LibraryKey;
-      if (key) setRoute({ type: "library", key });
+      if (urlSearchK && (route.type !== "library" || route.key !== urlSearchK))
+        setRoute({ type: "library", key: urlSearchK as LibraryKey });
     } else if (pathname === "/shorts") {
-      setRoute({ type: "home" });
+      if (route.type !== "home") setRoute({ type: "home" });
       requestAnimationFrame(() =>
         document.getElementById("shorts-shelf")?.scrollIntoView({ behavior: "smooth" }),
       );
+    } else if (pathname === "/") {
+      if (route.type !== "home") setRoute({ type: "home" });
     } else if (pathname === "/channel") {
-      const id = urlSearch?.["id"] as string;
-      if (id) setRoute({ type: "channel", id });
+      if (urlSearchId && (route.type !== "channel" || route.id !== urlSearchId))
+        setRoute({ type: "channel", id: urlSearchId });
     } else if (pathname === "/playlist") {
-      const id = urlSearch?.["id"] as string;
-      if (id) setRoute({ type: "playlist", id });
+      if (urlSearchId && (route.type !== "playlist" || route.id !== urlSearchId))
+        setRoute({ type: "playlist", id: urlSearchId });
     } else if (pathname === "/search") {
-      const q = urlSearch?.["q"] as string;
-      if (q) setSearchQ(q);
+      if (urlSearchQ && urlSearchQ !== searchQ) setSearchQ(urlSearchQ);
     }
-  }, [pathname, urlVideoId, urlSearch, setRoute]);
+  }, [
+    pathname,
+    urlVideoId,
+    urlSearchId,
+    urlSearchK,
+    urlSearchQ,
+    setRoute,
+    setSearchQ,
+    route,
+    searchQ,
+  ]);
 
   const isFeedMode = route.type === "home" || route.type === "subs";
   const isSearchActive = searchQ.trim().length > 0;
@@ -890,45 +919,88 @@ export default function App() {
     left: number;
     width: number;
     height: number;
+    position: "absolute" | "fixed";
     visible: boolean;
-  }>({ top: 0, left: 0, width: 0, height: 0, visible: false });
+  }>({ top: 0, left: 0, width: 0, height: 0, position: "fixed", visible: false });
+
+  const playerSwipeRef = useRef<{ startY: number; startX: number } | null>(null);
+
+  const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
   // Update player bounds based on active slot
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
+    let ro: ResizeObserver | null = null;
+
     const update = () => {
       let targetId = "";
       if (route.type === "watch") targetId = "watch-player-slot";
       else if (miniplayer) targetId = "miniplayer-player-slot";
 
       if (!targetId) {
-        setPlayerBounds((b) => ({ ...b, visible: false }));
+        setPlayerBounds((b) => (b.visible ? { ...b, visible: false } : b));
         return;
       }
 
       const el = document.getElementById(targetId);
+      const rootEl = document.getElementById("app-root");
       if (el) {
         const rect = el.getBoundingClientRect();
-        setPlayerBounds({
-          top: rect.top,
-          left: rect.left,
-          width: rect.width,
-          height: rect.height,
-          visible: true,
-        });
-      } else {
-        setPlayerBounds((b) => ({ ...b, visible: false }));
+        if (rect.width > 0 && rect.height > 0) {
+          const isWatch = route.type === "watch";
+          const rootRect = rootEl ? rootEl.getBoundingClientRect() : { top: 0, left: 0 };
+          const newTop = isWatch ? rect.top - rootRect.top : rect.top;
+          const newLeft = isWatch ? rect.left - rootRect.left : rect.left;
+          const newPos: "absolute" | "fixed" = isWatch ? "absolute" : "fixed";
+
+          setPlayerBounds((prev) => {
+            if (
+              prev.visible &&
+              prev.position === newPos &&
+              Math.abs(prev.top - newTop) < 1 &&
+              Math.abs(prev.left - newLeft) < 1 &&
+              Math.abs(prev.width - rect.width) < 1 &&
+              Math.abs(prev.height - rect.height) < 1
+            ) {
+              return prev;
+            }
+            return {
+              top: newTop,
+              left: newLeft,
+              width: rect.width,
+              height: rect.height,
+              position: newPos,
+              visible: true,
+            };
+          });
+        }
       }
+      // If el is not found yet in this microtask but targetId is set, do not turn visible false,
+      // as that would flash opacity 0 during the slot switch.
     };
 
     update();
-    const timer = setInterval(update, 100); // Check for layout shifts
+    const animId = requestAnimationFrame(update);
+    const t1 = setTimeout(update, 100);
+    const t2 = setTimeout(update, 350);
+
+    const targetId =
+      route.type === "watch" ? "watch-player-slot" : miniplayer ? "miniplayer-player-slot" : "";
+    const el = targetId ? document.getElementById(targetId) : null;
+    if (el && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => update());
+      ro.observe(el);
+    }
+
     window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
+    window.addEventListener("yt:player-slot-move", update);
 
     return () => {
-      clearInterval(timer);
+      cancelAnimationFrame(animId);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      if (ro) ro.disconnect();
       window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("yt:player-slot-move", update);
     };
   }, [route, miniplayer]);
 
@@ -936,7 +1008,7 @@ export default function App() {
   const activeVideoId = activeVideo ? videoIdFromUrl(activeVideo.url) : "";
 
   return (
-    <div className="min-h-screen bg-yt-bg text-yt-text">
+    <div id="app-root" className="min-h-screen bg-yt-bg text-yt-text relative">
       <Header
         onToggleSidebar={() =>
           inWatch || window.innerWidth < 768 ? setDrawer(true) : setExpanded((e) => !e)
@@ -964,6 +1036,10 @@ export default function App() {
       />
 
       <main
+        style={{
+          transform: mainDragY > 0 ? `translate3d(0, ${mainDragY}px, 0)` : "none",
+          transition: mainDragY > 0 ? "none" : "transform 0.2s ease-out",
+        }}
         className={`pt-14 transition-[margin] duration-200 ${
           inWatch ? "" : expanded ? "md:ms-60" : "md:ms-[72px]"
         } ${inWatch ? "" : "pb-20 md:pb-8"}`}
@@ -1327,21 +1403,72 @@ export default function App() {
       {/* Global Persistent Player */}
       {activeVideoId && (
         <div
+          id="persistent-player"
           style={{
-            position: "fixed",
+            position: playerBounds.position,
             top: playerBounds.top,
             left: playerBounds.left,
             width: playerBounds.width,
             height: playerBounds.height,
             zIndex: playerBounds.visible ? (route.type === "watch" ? 10 : 50) : -1,
-            pointerEvents: playerBounds.visible ? "auto" : "none",
+            pointerEvents: playerBounds.visible
+              ? route.type === "watch"
+                ? "auto"
+                : "none"
+              : "none",
             opacity: playerBounds.visible ? 1 : 0,
-            transition: "all 0.3s cubic-bezier(0.2, 0, 0, 1)",
+            transition: mainDragY > 0 ? "none" : "opacity 0.2s ease-out, transform 0.2s ease-out",
+            transform:
+              route.type === "watch" && mainDragY > 0
+                ? `translate3d(0, ${mainDragY}px, 0) scale(${1 - mainDragY * 0.0015})`
+                : "none",
             backgroundColor: "black",
             overflow: "hidden",
           }}
-          className={route.type === "watch" ? "lg:rounded-xl" : ""}
+          className={route.type === "watch" ? "lg:rounded-xl" : "rounded-t-xl overflow-hidden"}
         >
+          {route.type === "watch" && (
+            <div
+              className="absolute inset-0 z-30 pointer-events-auto touch-none"
+              onTouchStart={(e) => {
+                const touch = e.touches[0];
+                playerSwipeRef.current = { startY: touch.clientY, startX: touch.clientX };
+              }}
+              onTouchMove={(e) => {
+                const s = playerSwipeRef.current;
+                if (s) {
+                  const dy = e.touches[0].clientY - s.startY;
+                  const dx = e.touches[0].clientX - s.startX;
+                  if (dy > 0 && dy > Math.abs(dx)) {
+                    // Prevent default scrolling on video
+                    if (e.cancelable) e.preventDefault();
+                    // Limit the drag to 150px max
+                    const clampedY = Math.min(dy, 150);
+                    setMainDragY(clampedY);
+                  }
+                }
+              }}
+              onTouchEnd={(e) => {
+                const s = playerSwipeRef.current;
+                if (s) {
+                  const dy = e.changedTouches[0].clientY - s.startY;
+                  if (dy > 80) {
+                    minimizeVideo();
+                  } else if (dy < 10) {
+                    // Treat as click/tap on the video to toggle play/pause
+                    const iframe = document.querySelector("iframe");
+                    if (iframe && iframe.contentWindow) {
+                      // We toggle by sending playVideo (since YouTube API doesn't expose toggle,
+                      // we just play if paused, but if playing it does nothing unless we know state.
+                      // Without state, we send nothing or just play, or we let the user use the miniplayer controls).
+                    }
+                  }
+                }
+                setMainDragY(0);
+                playerSwipeRef.current = null;
+              }}
+            />
+          )}
           <YouTubePlayer
             videoId={activeVideoId}
             autoplay

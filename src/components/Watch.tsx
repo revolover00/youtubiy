@@ -1,21 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ThumbsUp,
   ThumbsDown,
   Share2,
-  Download,
-  ListPlus,
   ListVideo,
   MoreHorizontal,
   BadgeCheck,
   CornerDownLeft,
   Loader2,
   PictureInPicture2,
-  ChevronDown,
+  X,
 } from "lucide-react";
-import { getStreams } from "../lib/api";
+import { getCommentsPage, getStreams, searchPaged } from "../lib/api";
 import {
   channelIdFromUrl,
+  cleanDateText,
   fmtDuration,
   fmtViews,
   isLiveStream,
@@ -24,10 +23,8 @@ import {
   videoIdFromUrl,
 } from "../lib/format";
 import { addHistory, setMeta } from "../lib/store";
-import { appStore } from "../lib/appStore";
-import type { PipedVideo, StreamData } from "../lib/types";
+import type { PipedComment, PipedVideo, StreamData } from "../lib/types";
 import { Avatar, ErrorState } from "./Feed";
-import YouTubePlayer from "./YouTubePlayer";
 import { ShortsIcon } from "./icons";
 import { useLanguage } from "../lib/i18n";
 
@@ -55,14 +52,10 @@ export default function Watch({
   notify,
   liked,
   onToggleLike,
-  saved,
-  onToggleSave,
   onAddToPlaylist,
   isSubscribed,
   onToggleSub,
   onMinimize,
-  startTime,
-  onTimeUpdate,
 }: Props) {
   const { t, isAr, lang } = useLanguage();
   const id = videoIdFromUrl(video.url);
@@ -71,6 +64,34 @@ export default function Watch({
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [disliked, setDisliked] = useState(false);
+  const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
+
+  // Comments state & pagination
+  const [commentsList, setCommentsList] = useState<PipedComment[]>([]);
+  const [commentsCont, setCommentsCont] = useState<string | undefined>(undefined);
+  const [loadingComments, setLoadingComments] = useState(false);
+
+  // Infinite Suggested Videos state
+  const [relatedStreams, setRelatedStreams] = useState<PipedVideo[]>([]);
+  const [relatedCont, setRelatedCont] = useState<unknown | null>(null);
+  const [loadingMoreRelated, setLoadingMoreRelated] = useState(false);
+  const [relatedQueryIndex, setRelatedQueryIndex] = useState(0);
+  const loadMoreRelatedRef = useRef<HTMLDivElement>(null);
+
+  // Mobile swipe down gesture tracking
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const touchStateRef = useRef<{
+    startY: number;
+    startX: number;
+    active: boolean;
+    moved: boolean;
+  }>({
+    startY: 0,
+    startX: 0,
+    active: false,
+    moved: false,
+  });
+
   const labels = useMemo(
     () => ({
       all: isAr ? "الكل" : "All",
@@ -86,16 +107,27 @@ export default function Watch({
     setRelFilter(labels.all);
   }, [labels.all]);
 
+  // Initial video details fetch
   useEffect(() => {
     let alive = true;
     const controller = new AbortController();
 
     setData(null);
     setError(false);
+    setCommentsList([]);
+    setCommentsCont(undefined);
+    setRelatedStreams([]);
+    setRelatedCont(null);
+    setRelatedQueryIndex(0);
+
     getStreams(id)
       .then((d) => {
         if (!alive) return;
         setData(d);
+        setCommentsList(d.comments || []);
+        setCommentsCont(d.commentsContinuation);
+        setRelatedStreams(d.relatedStreams || []);
+
         setMeta(id, {
           title: d.title,
           thumbnail: video.thumbnail,
@@ -115,8 +147,9 @@ export default function Watch({
     };
   }, [id, attempt, video.thumbnail, video.duration]);
 
+  // Filtered related videos
   const related = useMemo(() => {
-    const list = (data?.relatedStreams || []).filter((r) => r.url?.includes("/watch"));
+    const list = relatedStreams.filter((r) => r.url?.includes("/watch"));
     if (relFilter === labels.fromChannel) {
       const f = list.filter((r) => r.uploaderName === (data?.uploader || video.uploaderName));
       if (f.length) return f;
@@ -126,7 +159,133 @@ export default function Watch({
       if (f.length) return f;
     }
     return list;
-  }, [data, relFilter, video.uploaderName, labels]);
+  }, [relatedStreams, relFilter, data?.uploader, video.uploaderName, labels]);
+
+  // Endless suggested videos pagination
+  const loadMoreRelated = useCallback(async () => {
+    if (loadingMoreRelated || !data) return;
+    setLoadingMoreRelated(true);
+
+    try {
+      const queries = [
+        data.title,
+        `${data.uploader} ${data.title.split(" ").slice(0, 3).join(" ")}`,
+        data.uploader,
+        data.title
+          .split(" ")
+          .filter((w) => w.length > 3)
+          .slice(0, 3)
+          .join(" "),
+      ].filter(Boolean);
+
+      const currentQuery = queries[relatedQueryIndex % queries.length] || data.title;
+      const res = await searchPaged(currentQuery, relatedCont || undefined);
+
+      if (res.items && res.items.length > 0) {
+        setRelatedStreams((prev) => {
+          const seenUrls = new Set(prev.map((v) => v.url));
+          seenUrls.add(video.url);
+          seenUrls.add(`/watch?v=${id}`);
+          const newVids = res.items.filter(
+            (v) => !seenUrls.has(v.url) && v.url?.includes("/watch"),
+          );
+          return [...prev, ...newVids];
+        });
+      }
+
+      if (res.next) {
+        setRelatedCont(res.next);
+      } else {
+        setRelatedQueryIndex((q) => q + 1);
+        setRelatedCont(null);
+      }
+    } catch {
+      setRelatedQueryIndex((q) => q + 1);
+      setRelatedCont(null);
+    } finally {
+      setLoadingMoreRelated(false);
+    }
+  }, [loadingMoreRelated, data, relatedCont, relatedQueryIndex, video.url, id]);
+
+  // IntersectionObserver for infinite scrolling suggested videos
+  useEffect(() => {
+    const el = loadMoreRelatedRef.current;
+    if (!el || !data) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingMoreRelated) {
+          void loadMoreRelated();
+        }
+      },
+      { rootMargin: "500px 0px" },
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMoreRelated, loadingMoreRelated, data]);
+
+  // Comments pagination handler
+  const loadMoreComments = useCallback(async () => {
+    if (loadingComments || !commentsCont) return;
+    setLoadingComments(true);
+    try {
+      const res = await getCommentsPage(commentsCont);
+      if (res.items && res.items.length > 0) {
+        setCommentsList((prev) => [...prev, ...res.items]);
+      }
+      setCommentsCont(res.nextContinuation);
+    } catch {
+      // Ignore transient pagination error
+    } finally {
+      setLoadingComments(false);
+    }
+  }, [loadingComments, commentsCont]);
+
+  // Touch Swipe Down to Minimize Handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStateRef.current = {
+      startY: touch.clientY,
+      startX: touch.clientX,
+      active: true,
+      moved: false,
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStateRef.current.active) return;
+    const dy = e.touches[0].clientY - touchStateRef.current.startY;
+    const dx = e.touches[0].clientX - touchStateRef.current.startX;
+
+    if (dy > 0 && dy > Math.abs(dx)) {
+      touchStateRef.current.moved = true;
+      const clampedY = Math.min(dy, 120);
+      setDragY(clampedY);
+      const persistentEl = document.getElementById("persistent-player");
+      if (persistentEl) {
+        persistentEl.style.transform = `translate3d(0, ${clampedY}px, 0) scale(${
+          1 - clampedY * 0.0015
+        })`;
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStateRef.current.active) return;
+    const dy = e.changedTouches[0].clientY - touchStateRef.current.startY;
+    touchStateRef.current.active = false;
+    setDragY(0);
+
+    const persistentEl = document.getElementById("persistent-player");
+    if (persistentEl) {
+      persistentEl.style.transform = "";
+    }
+
+    if (dy > 50 && onMinimize) {
+      onMinimize();
+    }
+  };
 
   useEffect(() => {
     if (data) {
@@ -134,30 +293,58 @@ export default function Watch({
         video_id: id,
         channel_id: channelIdFromUrl(data.uploaderUrl),
         category: data.category,
-        watched_at: new Date().toISOString(),
-        progress: appStore.getSnapshot().playbackTimes[id] || 0,
+        title: data.title,
+        duration: video.duration,
+        uploader: data.uploader,
       };
       addHistory(row);
       window.dispatchEvent(new CustomEvent("yt:history", { detail: row }));
     }
-  }, [data, id]);
+  }, [id, data, video.duration]);
 
   // Keyboard shortcut 'i' for miniplayer
   useEffect(() => {
-    if (!onMinimize) return;
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || (e.target as HTMLElement)?.isContentEditable) {
+      if (
+        (e.target as HTMLElement).tagName === "INPUT" ||
+        (e.target as HTMLElement).tagName === "TEXTAREA"
+      )
         return;
-      }
       if (e.key === "i" || e.key === "I") {
         e.preventDefault();
-        onMinimize();
+        onMinimize?.();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onMinimize]);
+
+  // Reset mobile comments drawer when video changes
+  useEffect(() => {
+    setMobileCommentsOpen(false);
+  }, [id]);
+
+  // Lock body scroll when mobile comments are open
+  useEffect(() => {
+    if (mobileCommentsOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileCommentsOpen]);
+
+  // Close mobile comments on Escape
+  useEffect(() => {
+    if (!mobileCommentsOpen) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileCommentsOpen(false);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [mobileCommentsOpen]);
 
   if (error) {
     return (
@@ -169,36 +356,57 @@ export default function Watch({
 
   if (!data) {
     return (
-      <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-6">
-        <div className="aspect-video rounded-none lg:rounded-xl bg-yt-surface animate-pulse grid place-items-center">
-          <Loader2 className="w-10 h-10 text-yt-sub animate-spin" />
+      <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col lg:flex-row gap-6">
+        <div className="flex-1 min-w-0">
+          <div className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black group">
+            <div id="watch-player-slot" className="w-full h-full" />
+            
+          </div>
+          <div className="h-6 w-2/3 bg-yt-surface rounded mt-4 animate-pulse" />
+          <div className="h-4 w-1/3 bg-yt-surface rounded mt-3 animate-pulse" />
         </div>
-        <div className="h-6 w-2/3 bg-yt-surface rounded mt-4 animate-pulse" />
-        <div className="h-4 w-1/3 bg-yt-surface rounded mt-3 animate-pulse" />
       </div>
     );
   }
 
   const channelId = channelIdFromUrl(data.uploaderUrl);
+  const cleanUploadDate = cleanDateText(data.uploadDate);
+  const displayRelativeDate =
+    data.relativeDate || timeAgo(video?.uploaded, data.uploadDate || video?.uploadedDate, lang);
+
+  const totalCommentsCount = data.commentCount || commentsList.length || 0;
+  const formattedCommentsCount =
+    totalCommentsCount > 0 ? fmtViews(totalCommentsCount, lang) : isAr ? "٠" : "0";
 
   return (
     <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col lg:flex-row gap-6">
       <div className="flex-1 min-w-0">
-        {/* native ad-free player slot */}
-        <div className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black group">
+        {/* Native ad-free player slot with swipe down to minimize support */}
+        <div
+          ref={playerContainerRef}
+
+          style={
+            dragY > 0
+              ? {
+                  transform: `translate3d(0, ${dragY}px, 0) scale(${1 - dragY * 0.0015})`,
+                  transition: "none",
+                }
+              : { transition: "transform 0.2s ease-out" }
+          }
+          className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black group shadow-lg"
+        >
           <div id="watch-player-slot" className="w-full h-full" />
+
+          {/* Top swipe-down grab indicator & minimize button for touch devices */}
           {onMinimize && (
-            <button
-              onClick={onMinimize}
-              className="absolute top-3 start-3 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/85 text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 max-md:opacity-90 shadow-lg"
-              title={`${t("miniplayer")} (i)`}
-              aria-label={t("miniplayer")}
-            >
-              <ChevronDown className="w-5 h-5" />
-            </button>
+            <div className="absolute top-0 inset-x-0 h-12 z-10 flex items-center justify-between px-3 bg-gradient-to-b from-black/70 via-black/20 to-transparent pointer-events-auto">
+              <div className="w-10 h-1 rounded-full bg-white/60 shadow-sm" />
+              <div className="w-9 h-9" />
+            </div>
           )}
         </div>
 
+        {/* Video Title & Actions */}
         <h1 className="font-display font-bold text-lg sm:text-xl mt-3 leading-snug">
           {data.title}
         </h1>
@@ -245,10 +453,20 @@ export default function Watch({
                   onToggleLike();
                   setDisliked(false);
                 }}
-                className={`flex items-center gap-2 h-9 ps-4 pe-3 text-sm font-medium hover:bg-yt-hover transition-colors ${liked ? "text-yt-blue" : ""}`}
+                className={`flex items-center gap-2 h-9 ps-4 pe-3 text-sm font-medium hover:bg-yt-hover transition-colors ${
+                  liked ? "text-yt-blue" : ""
+                }`}
               >
                 <ThumbsUp className={`w-5 h-5 ${liked ? "fill-current pop" : ""}`} />
-                <span className="tabular-nums">{fmtViews(data.likes + (liked ? 1 : 0), lang)}</span>
+                <span className="tabular-nums">
+                  {data.likes > 0
+                    ? fmtViews(data.likes + (liked ? 1 : 0), lang)
+                    : liked
+                      ? "1"
+                      : isAr
+                        ? "٠"
+                        : "0"}
+                </span>
               </button>
               <span className="w-px h-5 bg-yt-hover" />
               <button
@@ -256,7 +474,9 @@ export default function Watch({
                   setDisliked((d) => !d);
                   if (liked) onToggleLike();
                 }}
-                className={`h-9 px-3.5 hover:bg-yt-hover transition-colors ${disliked ? "text-yt-blue" : ""}`}
+                className={`h-9 px-3.5 hover:bg-yt-hover transition-colors ${
+                  disliked ? "text-yt-blue" : ""
+                }`}
                 aria-label={t("dislike")}
               >
                 <ThumbsDown className={`w-5 h-5 ${disliked ? "fill-current pop" : ""}`} />
@@ -269,13 +489,6 @@ export default function Watch({
               <Share2 className="w-5 h-5" /> {t("share")}
             </button>
             <button
-              onClick={() => notify(t("downloadStartedToast"))}
-              className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
-            >
-              <Download className="w-5 h-5" />{" "}
-              <span className="hidden sm:inline">{t("download")}</span>
-            </button>
-            <button
               onClick={() => onAddToPlaylist(video)}
               className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
             >
@@ -283,56 +496,18 @@ export default function Watch({
               <span className="hidden sm:inline">{t("save")}</span>
             </button>
             {onMinimize && (
-              <button
-                onClick={onMinimize}
-                className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium transition-colors border border-yt-border/40"
-                title={`${t("miniplayer")} (i)`}
-                aria-label={t("miniplayer")}
-              >
-                <PictureInPicture2 className="w-4 h-4 text-yt-blue" />
-                <span>{t("minimize")}</span>
-              </button>
-            )}
-            <button
-              className="w-9 h-9 rounded-full bg-yt-surface hover:bg-yt-hover grid place-items-center"
-              aria-label={t("more")}
-            >
-              <MoreHorizontal className="w-5 h-5" />
-            </button>
-          </div>
         </div>
 
-        {/* description */}
-        <div className="mt-4 bg-yt-surface rounded-xl p-3 text-sm">
-          <div className="font-bold flex flex-wrap gap-x-3">
-            <span>
-              {fmtViews(data.views, lang)} {t("views")}
-            </span>
-            <span>{timeAgo(undefined, data.uploadDate, lang)}</span>
-            {data.category && <span className="text-yt-blue">#{data.category}</span>}
+        {/* Desktop Comments (Shows all comments with real count and pagination) */}
+        <section className="hidden lg:block mt-6">
+          <div className="flex items-center gap-3">
+            <h2 className="font-display font-bold text-lg">
+              {totalCommentsCount > 0
+                ? `${formattedCommentsCount} ${isAr ? "تعليق" : "comments"}`
+                : t("comments")}
+            </h2>
           </div>
-          <p
-            className={`mt-2 leading-relaxed text-yt-text/90 whitespace-pre-line ${expanded ? "" : "line-clamp-2"}`}
-          >
-            {data.description || t("noDescription")}
-          </p>
-          {data.description && (
-            <button
-              onClick={() => setExpanded((e) => !e)}
-              className="font-bold mt-1 text-yt-sub hover:text-yt-text"
-            >
-              {expanded ? t("showLess") : t("showMore")}
-            </button>
-          )}
-        </div>
 
-        {/* comments */}
-        <section className="mt-6">
-          <h2 className="font-display font-bold text-lg">
-            {(data.comments?.length || 0) > 0
-              ? `${data.comments!.length} ${isAr ? "تعليق" : "comments"}`
-              : t("comments")}
-          </h2>
           <div className="flex gap-3 mt-4">
             <span className="w-10 h-10 rounded-full grid place-items-center text-sm font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black shrink-0">
               {isAr ? "أ" : "U"}
@@ -348,18 +523,37 @@ export default function Watch({
               }}
             />
           </div>
+
           <div className="mt-6 space-y-6">
-            {!data.comments?.length && (
-              <p className="text-sm text-yt-sub py-4">{t("noComments")}</p>
-            )}
-            {(data.comments || []).slice(0, 20).map((c, i) => (
+            {!commentsList.length && <p className="text-sm text-yt-sub py-4">{t("noComments")}</p>}
+            {commentsList.map((c, i) => (
               <CommentRow key={i} c={c} />
             ))}
+
+            {/* Load more comments trigger */}
+            {commentsCont && (
+              <div className="pt-4 text-center">
+                <button
+                  onClick={loadMoreComments}
+                  disabled={loadingComments}
+                  className="px-6 py-2 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium transition-all active:scale-95 inline-flex items-center gap-2"
+                >
+                  {loadingComments ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{isAr ? "جارٍ تحميل التعليقات..." : "Loading comments..."}</span>
+                    </>
+                  ) : (
+                    <span>{isAr ? "عرض المزيد من التعليقات" : "Load more comments"}</span>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </section>
       </div>
 
-      {/* related */}
+      {/* Related / Suggested Videos Column (Infinite Scrolling) */}
       <aside className="lg:w-[400px] xl:w-[420px] shrink-0">
         <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
           {Object.values(labels).map((t) => (
@@ -376,12 +570,13 @@ export default function Watch({
             </button>
           ))}
         </div>
+
         <div className="space-y-3">
           {related.map((r) => (
             <button
               key={r.url}
               onClick={() => onOpen(r)}
-              className="w-full flex gap-2.5 group text-start"
+              className="w-full flex gap-2.5 group text-start cursor-pointer"
             >
               <div className="relative w-[168px] aspect-video rounded-lg overflow-hidden bg-yt-raised shrink-0">
                 <img
@@ -421,7 +616,105 @@ export default function Watch({
             </button>
           ))}
         </div>
+
+        {/* Endless Scroll Sentinel for Suggested Videos */}
+        <div
+          ref={loadMoreRelatedRef}
+          className="h-24 flex items-center justify-center text-yt-sub mt-4"
+        >
+          {loadingMoreRelated ? (
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <Loader2 className="w-5 h-5 animate-spin text-yt-text" />
+              <span>{isAr ? "جارٍ تحميل مقترحات أخرى..." : "Loading more suggested..."}</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => void loadMoreRelated()}
+              className="h-9 px-5 rounded-full bg-yt-surface hover:bg-yt-hover text-xs font-medium transition-colors"
+            >
+              {isAr ? "المزيد من الفيديوهات المقترحة" : "More suggested videos"}
+            </button>
+          )}
+        </div>
       </aside>
+
+      {/* Mobile Comments Bottom Sheet (YouTube style) */}
+      {mobileCommentsOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+            onClick={() => setMobileCommentsOpen(false)}
+          />
+
+          {/* Sheet panel */}
+          <div className="relative z-10 w-full max-h-[84vh] h-[84vh] bg-yt-raised border-t border-yt-border/60 rounded-t-2xl shadow-2xl flex flex-col animate-in slide-in-from-bottom duration-200">
+            {/* Grab handle */}
+            <div className="w-10 h-1 rounded-full bg-yt-sub/40 mx-auto mt-2.5 mb-1 shrink-0" />
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-yt-border/40 shrink-0">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-base text-yt-text">{t("comments")}</h3>
+                <span className="text-xs text-yt-sub tabular-nums">{formattedCommentsCount}</span>
+              </div>
+              <button
+                onClick={() => setMobileCommentsOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-yt-hover grid place-items-center text-yt-text transition-colors active:scale-95"
+                aria-label={t("close")}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Write comment input */}
+            <div className="px-4 py-3 border-b border-yt-border/30 shrink-0 flex gap-3 items-center">
+              <span className="w-8 h-8 rounded-full grid place-items-center text-xs font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black shrink-0">
+                {isAr ? "أ" : "U"}
+              </span>
+              <input
+                placeholder={t("writeComment")}
+                className="flex-1 bg-yt-surface rounded-full px-3.5 py-1.5 text-sm placeholder:text-yt-sub outline-none border border-transparent focus:border-yt-border transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.target as HTMLInputElement).value.trim()) {
+                    notify(t("commentPostedToast"));
+                    (e.target as HTMLInputElement).value = "";
+                  }
+                }}
+              />
+            </div>
+
+            {/* Comments scroll container with all comments & pagination */}
+            <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-5">
+              {!commentsList.length && (
+                <p className="text-sm text-yt-sub py-10 text-center">{t("noComments")}</p>
+              )}
+              {commentsList.map((c, i) => (
+                <CommentRow key={i} c={c} />
+              ))}
+
+              {commentsCont && (
+                <div className="pt-2 pb-6 text-center">
+                  <button
+                    onClick={loadMoreComments}
+                    disabled={loadingComments}
+                    className="px-6 py-2 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium transition-all active:scale-95 inline-flex items-center gap-2"
+                  >
+                    {loadingComments ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>{isAr ? "جارٍ التحميل..." : "Loading..."}</span>
+                      </>
+                    ) : (
+                      <span>{isAr ? "عرض المزيد من التعليقات" : "Load more comments"}</span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

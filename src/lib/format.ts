@@ -137,12 +137,74 @@ const UNIT_DAYS: [RegExp, number][] = [
   [/(?:قبل|منذ)?\s*(\d+)?\s*(?:سنة|سنوات)/, 365],
 ];
 
+const AR_MONTHS: Record<string, number> = {
+  يناير: 0,
+  فبراير: 1,
+  مارس: 2,
+  أبريل: 3,
+  ابريل: 3,
+  مايو: 4,
+  يونيو: 5,
+  يوليو: 6,
+  أغسطس: 7,
+  اغسطس: 7,
+  سبتمبر: 8,
+  أكتوبر: 9,
+  اكتوبر: 9,
+  نوفمبر: 10,
+  ديسمبر: 11,
+};
+
+export function cleanDateText(s?: string): string {
+  if (!s) return "";
+  return s
+    .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function ageDays(uploaded?: number, uploadedDate?: string): number {
   if (uploaded && uploaded > 0) {
     return Math.max(0, (Date.now() - uploaded) / 86400000);
   }
   if (uploadedDate) {
-    const norm = uploadedDate.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+    const clean = cleanDateText(uploadedDate);
+    const norm = clean.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
+    // 1. DD/MM/YYYY or DD-MM-YYYY (e.g. 24/10/2009)
+    const dmy = norm.match(/(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+    if (dmy) {
+      const [, d, m, y] = dmy;
+      const dt = new Date(Number(y), Number(m) - 1, Number(d));
+      if (!isNaN(dt.getTime())) return Math.max(0, (Date.now() - dt.getTime()) / 86400000);
+    }
+
+    // 2. YYYY/MM/DD or YYYY-MM-DD
+    const ymd = norm.match(/(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
+    if (ymd) {
+      const [, y, m, d] = ymd;
+      const dt = new Date(Number(y), Number(m) - 1, Number(d));
+      if (!isNaN(dt.getTime())) return Math.max(0, (Date.now() - dt.getTime()) / 86400000);
+    }
+
+    // 3. Arabic spelled month (e.g. "24 أكتوبر 2009")
+    const arMatch = norm.match(/(\d{1,2})\s+([^\s\d]+)\s+(\d{4})/);
+    if (arMatch) {
+      const [, d, monStr, y] = arMatch;
+      const monthIdx = AR_MONTHS[monStr];
+      if (monthIdx !== undefined) {
+        const dt = new Date(Number(y), monthIdx, Number(d));
+        if (!isNaN(dt.getTime())) return Math.max(0, (Date.now() - dt.getTime()) / 86400000);
+      }
+    }
+
+    // 4. English or standard parseable date string
+    const parsedTs = Date.parse(norm);
+    if (!isNaN(parsedTs)) {
+      return Math.max(0, (Date.now() - parsedTs) / 86400000);
+    }
+
+    // 5. Match relative units (hours, days, weeks, months, years)
     for (const [re, days] of UNIT_DAYS) {
       const m = norm.match(re);
       if (m) {
@@ -151,7 +213,7 @@ export function ageDays(uploaded?: number, uploadedDate?: string): number {
       }
     }
   }
-  return 30;
+  return 0;
 }
 
 const AR_UNITS: [number, string, string, string][] = [
@@ -178,7 +240,29 @@ export function timeAgo(
   uploadedDate?: string,
   lang: "en" | "ar" = getCurrentLang(),
 ): string {
+  if (uploadedDate) {
+    const trimmed = cleanDateText(uploadedDate);
+    // If it is already a complete localized relative date phrase, preserve it directly!
+    if (
+      lang === "ar" &&
+      (trimmed.startsWith("قبل ") ||
+        trimmed.startsWith("منذ ") ||
+        trimmed.startsWith("تم البث ") ||
+        trimmed.startsWith("تم إجراء بث مباشر "))
+    ) {
+      return trimmed;
+    }
+    if (lang === "en" && (trimmed.endsWith(" ago") || trimmed.startsWith("Streamed "))) {
+      return trimmed;
+    }
+  }
+
   const d = ageDays(uploaded, uploadedDate);
+  if (d <= 0) {
+    const clean = cleanDateText(uploadedDate);
+    if (clean) return clean;
+    return lang === "ar" ? "الآن" : "Just now";
+  }
   if (d < 1 / 1440) return lang === "ar" ? "الآن" : "Just now";
   if (lang === "en") {
     for (const [unit, sing, plur] of EN_UNITS) {

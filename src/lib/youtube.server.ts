@@ -25,7 +25,7 @@ const CLIENT = {
   gl: "EG",
 };
 
-async function innertube<T = Json>(
+export async function innertube<T = Json>(
   endpoint: "search" | "browse" | "next" | "player",
   body: Record<string, unknown>,
 ): Promise<T> {
@@ -50,7 +50,7 @@ async function innertube<T = Json>(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-function collect(node: Json, key: string, out: Json[] = [], depth = 0): Json[] {
+export function collect(node: Json, key: string, out: Json[] = [], depth = 0): Json[] {
   // Prevent infinite loops from recursive structures (Youtubei sometimes has them)
   if (!node || typeof node !== "object" || depth > 20) return out;
   if (Array.isArray(node)) {
@@ -554,22 +554,89 @@ export async function suggest(query: string): Promise<string[]> {
   }
 }
 
-async function comments(token: string): Promise<PipedComment[]> {
+function parseCommentEntities(data: Json): PipedComment[] {
+  const fromEntities = collect(data, "commentEntityPayload")
+    .map((c: Json) => ({
+      author: c?.author?.displayName ?? "",
+      thumbnail: c?.author?.avatarThumbnailUrl ?? "",
+      commentText: c?.properties?.content?.content ?? "",
+      commentedTime: c?.properties?.publishedTime ?? "",
+      likeCount: parseCount(c?.toolbar?.likeCountLiked ?? c?.toolbar?.likeCountNotliked ?? ""),
+      replyCount: parseCount(c?.toolbar?.replyCount ?? ""),
+    }))
+    .filter((c) => c.commentText);
+
+  if (fromEntities.length > 0) return fromEntities;
+
+  return collect(data, "commentRenderer")
+    .map((c: Json) => ({
+      author: text(c?.authorText) || "",
+      thumbnail: c?.authorThumbnail?.thumbnails?.at(-1)?.url || "",
+      commentText: text(c?.contentText) || "",
+      commentedTime: text(c?.publishedTimeText) || "",
+      likeCount: parseCount(text(c?.voteCount) || ""),
+      replyCount: parseCount(text(c?.replyCount) || ""),
+    }))
+    .filter((c) => c.commentText);
+}
+
+function extractCommentsTotalCount(data: Json): number {
+  const header = collect(data, "commentsHeaderRenderer")[0];
+  if (header) {
+    const countText = text(header?.countText) || text(header?.commentsCount);
+    const count = parseCount(countText);
+    if (count > 0) return count;
+  }
   try {
-    const data = await innertube("next", { continuation: token });
-    return collect(data, "commentEntityPayload")
-      .map((c: Json) => ({
-        author: c?.author?.displayName ?? "",
-        thumbnail: c?.author?.avatarThumbnailUrl ?? "",
-        commentText: c?.properties?.content?.content ?? "",
-        commentedTime: c?.properties?.publishedTime ?? "",
-        likeCount: parseCount(c?.toolbar?.likeCountLiked ?? c?.toolbar?.likeCountNotliked ?? ""),
-        replyCount: parseCount(c?.toolbar?.replyCount ?? ""),
-      }))
-      .filter((c) => c.commentText)
-      .slice(0, 30);
+    const str = JSON.stringify(data);
+    const m =
+      str.match(/"countText":\{"runs":\[\{"text":"([^"]+)"\}/) ||
+      str.match(/"commentsCount":\{"runs":\[\{"text":"([^"]+)"\}/);
+    if (m && m[1]) {
+      const c = parseCount(m[1]);
+      if (c > 0) return c;
+    }
   } catch {
-    return [];
+    // ignore parse error
+  }
+  return 0;
+}
+
+function findNextCommentsToken(data: Json): string | undefined {
+  const items = collect(data, "continuationItemRenderer");
+  for (const item of items) {
+    const token = item?.continuationEndpoint?.continuationCommand?.token;
+    if (token && (token.includes("comments-section") || !token.includes("replies"))) {
+      return token;
+    }
+  }
+  return undefined;
+}
+
+export async function fetchComments(
+  token: string,
+  fetchMultiplePages = true,
+): Promise<{ items: PipedComment[]; totalCount: number; nextContinuation?: string }> {
+  try {
+    const p1 = await innertube("next", { continuation: token });
+    const totalCount = extractCommentsTotalCount(p1);
+    const items = parseCommentEntities(p1);
+    let nextCont = findNextCommentsToken(p1);
+
+    if (fetchMultiplePages && nextCont && items.length > 0) {
+      try {
+        const p2 = await innertube("next", { continuation: nextCont });
+        const p2Items = parseCommentEntities(p2);
+        items.push(...p2Items);
+        nextCont = findNextCommentsToken(p2) || nextCont;
+      } catch {
+        // ignore secondary page fetch error
+      }
+    }
+
+    return { items, totalCount, nextContinuation: nextCont };
+  } catch {
+    return { items: [], totalCount: 0 };
   }
 }
 
@@ -584,27 +651,157 @@ export async function videoDetails(videoId: string): Promise<StreamData> {
   const title = text(primary.title);
   if (!title) throw new Error("video unavailable");
 
-  const likeButton = collect(primary, "toggleButtonViewModel")[0];
-  const likeLabel =
-    likeButton?.defaultButtonViewModel?.buttonViewModel?.accessibilityText ??
-    text(collect(primary, "likeButton")[0]?.toggleButtonRenderer?.defaultText);
+  // Accurate like count extraction from modern InnerTube view models, entities, and factoids
+  let likes = 0;
+  const likeEntities = collect(next, "likeCountEntity");
+  for (const ent of likeEntities) {
+    if (ent.likeCountIfIndifferentNumber != null) {
+      likes = Number(ent.likeCountIfIndifferentNumber) || 0;
+      if (likes > 0) break;
+    }
+    if (ent.expandedLikeCountIfIndifferent?.content) {
+      likes = parseCount(ent.expandedLikeCountIfIndifferent.content);
+      if (likes > 0) break;
+    }
+    if (ent.likeCountIfIndifferent?.content) {
+      likes = parseCount(ent.likeCountIfIndifferent.content);
+      if (likes > 0) break;
+    }
+    if (ent.likeCountIfLikedNumber != null) {
+      likes = Number(ent.likeCountIfLikedNumber) || 0;
+      if (likes > 0) break;
+    }
+    if (ent.likeButtonA11yText?.content) {
+      likes = parseCount(ent.likeButtonA11yText.content);
+      if (likes > 0) break;
+    }
+  }
+
+  // Check likeButtonViewModel & segmentedLikeDislikeButtonViewModel
+  if (!likes) {
+    const likeButtonVMs = collect(next, "likeButtonViewModel");
+    for (const vm of likeButtonVMs) {
+      const buttonVMs = collect(vm, "buttonViewModel");
+      for (const b of buttonVMs) {
+        if (b.accessibilityText && /\d/.test(b.accessibilityText)) {
+          const v = parseCount(b.accessibilityText);
+          if (v > 0) {
+            likes = v;
+            break;
+          }
+        }
+        if (b.title && /\d/.test(b.title)) {
+          const v = parseCount(b.title);
+          if (v > 0) {
+            likes = v;
+            break;
+          }
+        }
+      }
+      if (likes > 0) break;
+    }
+  }
+
+  // Check any buttonViewModel with like ID or action
+  if (!likes) {
+    const allButtons = collect(next, "buttonViewModel");
+    for (const b of allButtons) {
+      if (b.accessibilityId === "id.video.like.button" || /like/i.test(b.accessibilityId ?? "")) {
+        if (b.accessibilityText && /\d/.test(b.accessibilityText)) {
+          const v = parseCount(b.accessibilityText);
+          if (v > 0) {
+            likes = v;
+            break;
+          }
+        }
+        if (b.title && /\d/.test(b.title)) {
+          const v = parseCount(b.title);
+          if (v > 0) {
+            likes = v;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Check FactoidRenderer
+  if (!likes) {
+    const factoids = collect(next, "factoidRenderer");
+    for (const f of factoids) {
+      const lbl = f?.label?.simpleText || f?.accessibilityText || "";
+      if (/معجب|إعجاب|like/i.test(lbl)) {
+        likes = parseCount(f?.value?.simpleText || f?.accessibilityText);
+        if (likes > 0) break;
+      }
+    }
+  }
+
+  // Check Legacy toggleButtonRenderer / likeButton
+  if (!likes) {
+    const legacyButtons = collect(primary, "likeButton");
+    for (const lb of legacyButtons) {
+      const label =
+        text(lb?.toggleButtonRenderer?.defaultText) ??
+        text(lb?.toggleButtonRenderer?.accessibility?.label);
+      const v = parseCount(label ?? "");
+      if (v > 0) {
+        likes = v;
+        break;
+      }
+    }
+  }
+
+  // Accurate date extraction (exact date & relative date)
+  const rawRelDate =
+    text(primary.relativeDateText?.accessibility?.accessibilityData?.label) ||
+    text(primary.relativeDateText);
+  const rawDateText = text(collect(primary, "dateText")[0]) || text(primary.dateText);
+
+  // Check factoid date for clean spelled-out date (e.g. "24 أكتوبر 2009")
+  const factoids = collect(next, "factoidRenderer");
+  let factoidDate = "";
+  for (const f of factoids) {
+    const val = text(f?.value);
+    const lbl = text(f?.label);
+    if (/\d{4}/.test(val) && lbl) {
+      factoidDate = `${lbl} ${val}`.trim();
+      break;
+    }
+  }
+
+  const uploadDate = factoidDate || rawDateText || rawRelDate || "";
+  const relativeDate = rawRelDate || "";
 
   const channelId = owner?.navigationEndpoint?.browseEndpoint?.browseId ?? "";
 
   const related = extractVideos(collect(next, "secondaryResults")[0] ?? {});
 
-  const commentToken = collect(next, "continuationItemRenderer")
+  const allTokens = collect(next, "continuationItemRenderer")
     .map((c: Json) => c?.continuationEndpoint?.continuationCommand?.token)
-    .filter(Boolean)
-    .at(-1);
+    .filter(Boolean);
+
+  const commentToken =
+    allTokens.find((t: string) => {
+      try {
+        return decodeURIComponent(t).includes("comments-section");
+      } catch {
+        return false;
+      }
+    }) || allTokens[0];
+
+  const commentsData = commentToken
+    ? await fetchComments(commentToken, true)
+    : { items: [], totalCount: 0 };
 
   return {
     title,
     description:
       text(collect(secondary, "attributedDescription")[0]) || text(secondary.description),
-    uploadDate: text(collect(primary, "dateText")[0]) || text(primary.relativeDateText),
+    uploadDate,
+    relativeDate,
     category: "",
-    likes: parseCount(likeLabel ?? ""),
+    likes,
     views: parseCount(text(collect(primary, "videoViewCountRenderer")[0]?.viewCount)),
     uploader: text(owner.title),
     uploaderUrl: channelId ? `/channel/${channelId}` : "",
@@ -613,8 +810,17 @@ export async function videoDetails(videoId: string): Promise<StreamData> {
     uploaderSubscriberCount: parseCount(text(owner.subscriberCountText)),
     videoStreams: [],
     relatedStreams: related,
-    comments: commentToken ? await comments(commentToken) : [],
+    comments: commentsData.items,
+    commentCount: commentsData.totalCount,
+    commentsContinuation: commentsData.nextContinuation,
   };
+}
+
+export async function getCommentsPage(
+  token: string,
+): Promise<{ items: PipedComment[]; nextContinuation?: string }> {
+  const res = await fetchComments(token, false);
+  return { items: res.items, nextContinuation: res.nextContinuation };
 }
 
 /** Videos tab of a channel (accepts UC… id or @handle). */

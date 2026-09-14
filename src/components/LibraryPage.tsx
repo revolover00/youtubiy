@@ -4,7 +4,6 @@ import {
   Clock,
   ThumbsUp,
   ListVideo,
-  Download,
   Flame,
   Music2,
   Gamepad2,
@@ -34,8 +33,6 @@ export type LibraryKey =
   | "Playlists"
   | "مقاطع الفيديو"
   | "Your Videos"
-  | "التنزيلات"
-  | "Downloads"
   | "الرائج"
   | "Trending"
   | "الموسيقى"
@@ -79,9 +76,6 @@ function normalizeKey(page: string): string {
     case "Your Videos":
     case "مقاطع الفيديو":
       return "videos";
-    case "Downloads":
-    case "التنزيلات":
-      return "downloads";
     case "Trending":
     case "الرائج":
       return "trending";
@@ -178,11 +172,6 @@ export default function LibraryPage(props: Props) {
       icon: PlayCircle,
       title: t("yourVideos"),
       empty: t("yourVideosEmptyMessage"),
-    },
-    downloads: {
-      icon: Download,
-      title: t("downloads"),
-      empty: t("downloadsEmptyMessage"),
     },
     trending: {
       icon: Flame,
@@ -373,7 +362,7 @@ export default function LibraryPage(props: Props) {
   }
 
   // ---- empty/informational pages ----
-  if (normalized === "videos" || normalized === "downloads") {
+  if (normalized === "videos") {
     return (
       <div className="max-w-[1400px] mx-auto px-3 sm:px-6 pt-6">
         <h1 className="font-display font-black text-2xl mb-6 flex items-center gap-3">

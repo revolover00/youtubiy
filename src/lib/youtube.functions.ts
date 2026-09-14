@@ -72,3 +72,14 @@ export const browsePageFn = createServerFn({ method: "POST" })
     const { browsePage } = await import("./youtube.server");
     return browsePage(data.continuation);
   });
+
+export const commentsPageFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => z.object({ token: z.string().min(1) }).parse(data))
+  .handler(
+    async ({
+      data,
+    }): Promise<{ items: import("./types").PipedComment[]; nextContinuation?: string }> => {
+      const { getCommentsPage } = await import("./youtube.server");
+      return getCommentsPage(data.token);
+    },
+  );

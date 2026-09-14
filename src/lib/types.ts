@@ -36,6 +36,7 @@ export interface StreamData {
   title: string;
   description: string;
   uploadDate: string;
+  relativeDate?: string;
   category: string;
   likes: number;
   views: number;
@@ -48,6 +49,8 @@ export interface StreamData {
   hls?: string;
   relatedStreams: PipedVideo[];
   comments?: PipedComment[];
+  commentCount?: number;
+  commentsContinuation?: string;
 }
 
 export interface ChannelData {

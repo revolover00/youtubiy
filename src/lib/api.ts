@@ -17,9 +17,11 @@ import {
   trendingPageFn,
   videoDetailsFn,
   browsePageFn,
+  commentsPageFn,
 } from "./youtube.functions";
 import type {
   ChannelData,
+  PipedComment,
   PipedVideo,
   PlaylistData,
   SearchChannel,
@@ -137,4 +139,10 @@ export function getTrending(): Promise<PipedVideo[]> {
     trendingCache.value.catch(() => (trendingCache.value = null));
   }
   return trendingCache.value;
+}
+
+export async function getCommentsPage(
+  token: string,
+): Promise<{ items: PipedComment[]; nextContinuation?: string }> {
+  return run("تعليقات إضافية", () => commentsPageFn({ data: { token } }));
 }

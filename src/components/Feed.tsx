@@ -289,13 +289,13 @@ export function VideoCard({
   const durationStr = fmtDuration(video.duration);
 
   const thumb = (
-    <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised">
+    <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised transition-all duration-300 ease-out group-hover:scale-[1.02] group-hover:shadow-lg group-hover:shadow-black/25">
       <img
         src={video.thumbnail}
         alt={video.title}
         loading="lazy"
         referrerPolicy="no-referrer"
-        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
+        className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.05]"
       />
       {isLive ? (
         <span className="absolute bottom-1.5 end-1.5 bg-yt-red text-white text-[11px] sm:text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1.5 shadow-md">

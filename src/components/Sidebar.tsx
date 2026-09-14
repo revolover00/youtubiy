@@ -3,7 +3,6 @@ import {
   History,
   Clock,
   ThumbsUp,
-  Download,
   ListVideo,
   UserRound,
   SquarePlay,
@@ -86,7 +85,6 @@ function FullContent({
     { icon: SquarePlay, label: t("yourVideos"), id: "videos" },
     { icon: Clock, label: t("watchLater"), id: "watchlater" },
     { icon: ThumbsUp, label: t("likedVideos"), id: "liked" },
-    { icon: Download, label: t("downloads"), id: "downloads" },
   ];
 
   const EXPLORE = [

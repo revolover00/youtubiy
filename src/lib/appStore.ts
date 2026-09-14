@@ -17,8 +17,6 @@ export type LibraryKey =
   | "Playlists"
   | "مقاطع الفيديو"
   | "Your Videos"
-  | "التنزيلات"
-  | "Downloads"
   | "الرائج"
   | "Trending"
   | "الموسيقى"

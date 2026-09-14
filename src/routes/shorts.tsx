@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import App from "../App";
 
 export const Route = createFileRoute("/shorts")({
-  component: () => <App />,
+  component: () => null,
 });

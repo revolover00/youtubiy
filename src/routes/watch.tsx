@@ -2,8 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { z } from "zod";
 
-import App from "../App";
-
 const title = "مشاهدة فيديو — يوتيوب بالعربية";
 const description = "شغّل الفيديو بجودة عالية مع الاقتراحات والتعليقات بواجهة عربية سريعة.";
 
@@ -23,9 +21,5 @@ export const Route = createFileRoute("/watch")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: WatchRoute,
+  component: () => null,
 });
-
-function WatchRoute() {
-  return <App />;
-}
