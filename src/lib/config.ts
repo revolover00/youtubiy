@@ -12,6 +12,7 @@ export interface HomeTopic {
 export const HOME_TOPICS: HomeTopic[] = [
   { id: "all", en: "All", ar: "الكل", query: "" },
   { id: "trending", en: "Trending", ar: "الرائج", query: "trending" },
+  { id: "live", en: "Live", ar: "بث مباشر", query: "live stream" },
   { id: "gaming", en: "Gaming", ar: "ألعاب", query: "gaming" },
   { id: "minecraft", en: "Minecraft", ar: "ماينكرافت", query: "minecraft gameplay" },
   { id: "tech", en: "Technology", ar: "تقنية", query: "technology review" },
@@ -37,6 +38,7 @@ export type SearchFilterId = (typeof SEARCH_FILTER_CHIPS)[number]["id"];
 export const TOPIC_QUERY: Record<string, string> = {
   All: "",
   Trending: "trending",
+  Live: "live stream",
   Gaming: "gaming",
   Minecraft: "minecraft gameplay",
   Technology: "technology review",
@@ -46,6 +48,8 @@ export const TOPIC_QUERY: Record<string, string> = {
   Cars: "cars review",
   الكل: "",
   الرائج: "trending",
+  "بث مباشر": "live stream",
+  مباشر: "live stream",
   ألعاب: "gaming",
   ماينكرافت: "minecraft gameplay",
   تقنية: "technology review",

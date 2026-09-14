@@ -26,11 +26,7 @@ import {
 } from "lucide-react";
 import { LogoIcon } from "./icons";
 import { suggestions } from "../lib/api";
-import {
-  getSubscriptions,
-  getNotifications,
-  markNotificationAsRead,
-} from "../lib/store";
+import { getSubscriptions, getNotifications, markNotificationAsRead } from "../lib/store";
 import { refreshNotifications } from "../lib/notifications";
 import { fmtDuration } from "../lib/format";
 import type { PipedVideo, AppNotification } from "../lib/types";
@@ -213,7 +209,7 @@ export default function Header({
               onClick={onBack}
               className="w-10 h-10 rounded-full hover:bg-yt-surface flex items-center justify-center text-yt-text"
               aria-label={t("back")}
-              title={isAr ? "رجوع وتصغير الفيديو" : "Back & minimize"}
+              title={t("backAndMinimize")}
             >
               {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
             </button>
@@ -397,7 +393,7 @@ export default function Header({
                     )}
                     {notifs && notifs.length === 0 && (
                       <p className="px-4 py-12 text-sm text-yt-sub text-center leading-relaxed">
-                        {isAr ? "لا توجد إشعارات جديدة من اشتراكاتك" : "No new notifications from your subscriptions"}
+                        {t("noNewNotifications")}
                       </p>
                     )}
                     {notifs?.map((n) => (
@@ -422,7 +418,12 @@ export default function Header({
                       >
                         <div className="shrink-0 pt-1">
                           {n.channel_avatar ? (
-                            <img src={n.channel_avatar} alt="" className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
+                            <img
+                              src={n.channel_avatar}
+                              alt=""
+                              className="w-10 h-10 rounded-full"
+                              referrerPolicy="no-referrer"
+                            />
                           ) : (
                             <div className="w-10 h-10 rounded-full bg-yt-surface grid place-items-center">
                               <Bell className="w-4 h-4 text-yt-sub" />
@@ -431,15 +432,19 @@ export default function Header({
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-[13px] leading-snug line-clamp-2">
-                            <span className="font-bold">{n.channel_name}</span> {isAr ? "نشر فيديو جديد:" : "uploaded:"} {n.title}
+                            <span className="font-bold">{n.channel_name}</span>{" "}
+                            {t("uploadedNewVideo")} {n.title}
                           </p>
                           <p className="text-[11px] text-yt-sub mt-1">
-                            {new Date(n.created_at).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US", { 
-                              month: "short", 
-                              day: "numeric",
-                              hour: "numeric",
-                              minute: "numeric"
-                            })}
+                            {new Date(n.created_at).toLocaleDateString(
+                              lang === "ar" ? "ar-EG" : "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "numeric",
+                              },
+                            )}
                           </p>
                         </div>
                         <img
@@ -466,10 +471,10 @@ export default function Header({
               <button
                 onClick={() => signIn().catch(() => {})}
                 className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-yt-blue/40 text-yt-blue hover:bg-yt-blue/10 text-xs sm:text-sm font-semibold transition-colors"
-                title={isAr ? "تسجيل الدخول باستخدام Google" : "Sign in with Google"}
+                title={t("signInWithGoogle")}
               >
                 <LogIn className="w-4 h-4" />
-                <span>{isAr ? "تسجيل الدخول" : "Sign in"}</span>
+                <span>{t("signIn")}</span>
               </button>
             )}
 
@@ -487,10 +492,12 @@ export default function Header({
                 />
               ) : user?.displayName ? (
                 user.displayName.charAt(0).toUpperCase()
+              ) : user ? (
+                "U"
               ) : isAr ? (
                 "أ"
               ) : (
-                "U"
+                "G"
               )}
             </button>
 
@@ -509,18 +516,20 @@ export default function Header({
                         />
                       ) : user?.displayName ? (
                         user.displayName.charAt(0).toUpperCase()
+                      ) : user ? (
+                        "U"
                       ) : isAr ? (
                         "أ"
                       ) : (
-                        "U"
+                        "G"
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-sm truncate">
-                        {user ? user.displayName || "User" : isAr ? "زائر" : "Guest"}
+                        {user ? user.displayName || "User" : t("guest")}
                       </p>
                       <p className="text-xs text-yt-sub truncate">
-                        {user ? user.email : isAr ? "غير مسجل الدخول" : "Not signed in"}
+                        {user ? user.email : t("notSignedIn")}
                       </p>
                     </div>
                   </div>
@@ -529,11 +538,11 @@ export default function Header({
                   <div className="px-4 py-2 bg-yt-surface/50 text-xs border-b border-yt-border flex items-center justify-between">
                     <div className="flex items-center gap-2 text-yt-sub">
                       <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "سحابة Firebase" : "Firebase Cloud"}</span>
+                      <span>{t("firebaseCloud")}</span>
                     </div>
                     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      {user ? (isAr ? "متزامن" : "Synced") : isAr ? "جاهز" : "Ready"}
+                      {user ? t("synced") : t("ready")}
                     </span>
                   </div>
 
@@ -542,22 +551,14 @@ export default function Header({
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <Youtube className="w-4 h-4 text-red-500 shrink-0" />
-                        <span className="text-xs font-semibold">
-                          {isAr ? "اشتراكات YouTube" : "YouTube Channels"}
-                        </span>
+                        <span className="text-xs font-semibold">{t("youtubeChannels")}</span>
                       </div>
                       <span className="text-[11px] text-yt-sub">
                         {lastImportResult
-                          ? isAr
-                            ? `${lastImportResult.importedSubsCount} قناة مستوردة`
-                            : `${lastImportResult.importedSubsCount} imported`
+                          ? `${lastImportResult.importedSubsCount} ${t("channelsImported")}`
                           : user
-                            ? isAr
-                              ? "حساب Google متصل"
-                              : "Google connected"
-                            : isAr
-                              ? "جاهز للاستيراد"
-                              : "Ready"}
+                            ? t("googleConnected")
+                            : t("readyToImport")}
                       </span>
                     </div>
                     <button
@@ -568,11 +569,7 @@ export default function Header({
                       className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white text-xs font-medium transition-all"
                     >
                       <Youtube className="w-3.5 h-3.5" />
-                      <span>
-                        {isAr
-                          ? "استيراد اشتراكات يوتيوب (Takeout / CSV)"
-                          : "Import YouTube Subscriptions"}
-                      </span>
+                      <span>{t("importYouTubeSubs")}</span>
                     </button>
                   </div>
 
@@ -587,12 +584,8 @@ export default function Header({
                       >
                         <LogIn className="w-5 h-5 shrink-0" />
                         <div className="min-w-0">
-                          <p>{isAr ? "تسجيل الدخول بحساب Google" : "Sign in with Google"}</p>
-                          <p className="text-[11px] text-yt-sub">
-                            {isAr
-                              ? "لحفظ المفضلة والمشاهدات ومزامنة السحابة"
-                              : "Save likes, history & sync cloud"}
-                          </p>
+                          <p>{t("signInWithGoogle")}</p>
+                          <p className="text-[11px] text-yt-sub">{t("signInGoogleBenefit")}</p>
                         </div>
                       </button>
                     ) : (
@@ -604,7 +597,7 @@ export default function Header({
                         className="w-full flex items-center gap-3.5 px-4 py-2.5 hover:bg-yt-surface text-sm text-start font-medium text-red-400 hover:text-red-300"
                       >
                         <LogOut className="w-5 h-5 shrink-0" />
-                        <span>{isAr ? "تسجيل الخروج" : "Sign out"}</span>
+                        <span>{t("signOut")}</span>
                       </button>
                     )}
 
@@ -615,12 +608,10 @@ export default function Header({
                       }}
                       className="w-full flex items-center gap-3.5 px-4 py-2.5 hover:bg-yt-surface text-sm text-start"
                     >
-                      <RefreshCw className={`w-5 h-5 text-yt-sub shrink-0 ${importingYouTube ? "animate-spin text-yt-blue" : ""}`} />
-                      <span>
-                        {importingYouTube 
-                          ? (isAr ? "جاري المزامنة..." : "Syncing...") 
-                          : (isAr ? "مزامنة يوتيوب" : "Sync YouTube")}
-                      </span>
+                      <RefreshCw
+                        className={`w-5 h-5 text-yt-sub shrink-0 ${importingYouTube ? "animate-spin text-yt-blue" : ""}`}
+                      />
+                      <span>{importingYouTube ? t("syncing") : t("syncYouTube")}</span>
                     </button>
 
                     <button

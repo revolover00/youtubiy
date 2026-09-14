@@ -39,7 +39,14 @@ import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
 import { buildHomeFeed, buildSubscriptionsFeed } from "./lib/recommend";
 import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
-import { ageDays, channelIdFromUrl, videoIdFromUrl } from "./lib/format";
+import {
+  ageDays,
+  channelIdFromUrl,
+  isLiveStream,
+  isShortsVideo,
+  isStandardVideo,
+  videoIdFromUrl,
+} from "./lib/format";
 import {
   clearHistory,
   getHistory,
@@ -110,7 +117,7 @@ export default function App() {
 
   const { route } = useAppStore();
   const setRoute = appStore.setRoute;
-  
+
   const [expanded, setExpanded] = useState(true);
   const [drawer, setDrawer] = useState(false);
   const [activeNav, setActiveNav] = useState("home");
@@ -503,19 +510,33 @@ export default function App() {
       const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
       appStore.setMiniplayer({ video: route.video, time });
     }
+    appStore.setSearchQ("");
+    appStore.setSearchFilter("All");
+    setChip("All");
     setRoute({ type: "home" });
     setActiveNav("home");
     if (pathname !== "/") void routerNav({ to: "/" });
     window.scrollTo({ top: 0 });
   };
 
-  const openVideo = (v: PipedVideo) => {
+  const openVideo = (v: PipedVideo, forceWatch = false) => {
     const id = videoIdFromUrl(v.url);
     if (!id) return;
-    
+
+    if (!forceWatch && isShortsVideo(v)) {
+      const idx = shortsItems.findIndex((s) => videoIdFromUrl(s.url) === id);
+      if (idx !== -1) {
+        setShorts({ items: shortsItems, index: idx });
+      } else {
+        setShorts({ items: [v], index: 0 });
+      }
+      return;
+    }
+
+    setShorts(null);
     appStore.setMiniplayer(null);
     setRoute({ type: "watch", video: v });
-    
+
     if (id !== urlVideoId) {
       void routerNav({ to: "/watch", search: { v: id } });
     }
@@ -614,7 +635,9 @@ export default function App() {
     window.addEventListener("yt:nav", onNav);
     window.addEventListener("yt:add-to-playlist", onAddToPlaylist);
     const onPlaylistUpdate = () => {
-      getCustomPlaylists().then(setCustomPlaylists).catch(() => {});
+      getCustomPlaylists()
+        .then(setCustomPlaylists)
+        .catch(() => {});
     };
     window.addEventListener("yt:playlists-updated", onPlaylistUpdate);
     return () => {
@@ -656,19 +679,22 @@ export default function App() {
       appStore.setMiniplayer({ video: route.video, time });
     }
     setActiveNav(label);
-    
-    if (label === "home" || label === t("home")) {
-      setSearchQ("");
-      void routerNav({ to: "/" });
+
+    if (label === "home" || label === t("home") || label === "الرئيسية" || label === "Home") {
       goHome();
+      return;
     } else if (label === "Shorts" || label === t("shorts")) {
       setSearchQ("");
       void routerNav({ to: "/shorts" });
       setRoute({ type: "home" });
       setChip("All");
-      requestAnimationFrame(() =>
-        document.getElementById("shorts-shelf")?.scrollIntoView({ behavior: "smooth" }),
-      );
+      if (shortsItems.length > 0) {
+        setShorts({ items: shortsItems, index: 0 });
+      } else {
+        requestAnimationFrame(() =>
+          document.getElementById("shorts-shelf")?.scrollIntoView({ behavior: "smooth" }),
+        );
+      }
     } else if (label === "subscriptions" || label === t("subscriptions")) {
       setSearchQ("");
       void routerNav({ to: "/subscriptions" });
@@ -731,20 +757,7 @@ export default function App() {
       case "Shorts": {
         showChans = false;
         showPlays = false;
-        list = list.filter((v) => {
-          const dur = v.duration;
-          const isShortDur = dur > 0 && dur <= 60;
-          const isShortTag =
-            (v.title || "").toLowerCase().includes("#shorts") ||
-            (v.title || "").toLowerCase().includes("shorts");
-          const isShortName = v.uploaderName === "Shorts";
-          const isReel =
-            dur === 0 &&
-            !v.type?.includes("live") &&
-            !(v.uploadedDate || "").includes("مباشر") &&
-            !(v.uploadedDate || "").toLowerCase().includes("live");
-          return isShortDur || isShortTag || isShortName || isReel;
-        });
+        list = list.filter((v) => isShortsVideo(v));
         break;
       }
 
@@ -765,12 +778,7 @@ export default function App() {
       case "Videos": {
         showChans = false;
         showPlays = false;
-        list = list.filter((v) => {
-          const dur = v.duration;
-          const isShort =
-            (dur > 0 && dur <= 60) || (v.title || "").toLowerCase().includes("#shorts");
-          return !isShort && dur > 0;
-        });
+        list = list.filter((v) => isStandardVideo(v));
         break;
       }
 
@@ -786,16 +794,7 @@ export default function App() {
       case "Live": {
         showChans = false;
         showPlays = false;
-        list = list.filter((v) => {
-          const dur = v.duration;
-          const isLiveType = v.type === "live";
-          const isLiveText =
-            (v.uploadedDate || "").includes("مباشر") ||
-            (v.uploadedDate || "").toLowerCase().includes("live") ||
-            (v.title || "").includes("بث مباشر") ||
-            (v.title || "").toLowerCase().includes("live stream");
-          return (dur === 0 && isLiveText) || isLiveType;
-        });
+        list = list.filter((v) => isLiveStream(v));
         break;
       }
     }
@@ -808,7 +807,7 @@ export default function App() {
   }, [feed, hidden, isSearchActive, searchFilter, watchedSet]);
 
   const shortsItems = useMemo(
-    () => (feed || []).filter((v) => v.duration > 0 && v.duration <= 60).slice(0, 8),
+    () => (feed || []).filter((v) => isShortsVideo(v)).slice(0, 10),
     [feed],
   );
   const showShorts =
@@ -1071,9 +1070,7 @@ export default function App() {
               />
             )}
 
-            {!isSearchActive && route.type === "home" && subs.length === 0 && (
-              <YouTubeSyncBanner />
-            )}
+            {!isSearchActive && route.type === "home" && subs.length === 0 && <YouTubeSyncBanner />}
 
             {feedErr ? (
               <ErrorState onRetry={() => setFeedAttempt((a) => a + 1)} />
@@ -1306,7 +1303,7 @@ export default function App() {
           items={shorts.items}
           initialIndex={shorts.index}
           onClose={() => setShorts(null)}
-          onOpenWatch={openVideo}
+          onOpenWatch={(v) => openVideo(v, true)}
         />
       )}
 

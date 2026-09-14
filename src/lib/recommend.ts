@@ -53,11 +53,8 @@ export async function buildHomeFeed(
 
   // 3) Related streams of the last 5 watched videos and last 3 liked videos.
   const relatedIds = new Set<string>();
-  
-  const sources = [
-    ...history.slice(0, 5).map(h => h.video_id),
-    ...likedIds.slice(0, 3)
-  ];
+
+  const sources = [...history.slice(0, 5).map((h) => h.video_id), ...likedIds.slice(0, 3)];
 
   await Promise.allSettled(
     sources.map(async (videoId) => {

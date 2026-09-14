@@ -14,12 +14,21 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { getStreams } from "../lib/api";
-import { channelIdFromUrl, fmtDuration, fmtViews, timeAgoAr, videoIdFromUrl } from "../lib/format";
+import {
+  channelIdFromUrl,
+  fmtDuration,
+  fmtViews,
+  isLiveStream,
+  isShortsVideo,
+  timeAgo,
+  videoIdFromUrl,
+} from "../lib/format";
 import { addHistory, setMeta } from "../lib/store";
 import { appStore } from "../lib/appStore";
 import type { PipedVideo, StreamData } from "../lib/types";
 import { Avatar, ErrorState } from "./Feed";
 import YouTubePlayer from "./YouTubePlayer";
+import { ShortsIcon } from "./icons";
 import { useLanguage } from "../lib/i18n";
 
 interface Props {
@@ -55,7 +64,7 @@ export default function Watch({
   startTime,
   onTimeUpdate,
 }: Props) {
-  const { t, isAr } = useLanguage();
+  const { t, isAr, lang } = useLanguage();
   const id = videoIdFromUrl(video.url);
   const [data, setData] = useState<StreamData | null>(null);
   const [error, setError] = useState(false);
@@ -153,10 +162,7 @@ export default function Watch({
   if (error) {
     return (
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-6">
-        <ErrorState
-          onRetry={() => setAttempt((a) => a + 1)}
-          message="تعذّر جلب بيانات هذا الفيديو، حاول مرة أخرى."
-        />
+        <ErrorState onRetry={() => setAttempt((a) => a + 1)} message={t("watchError")} />
       </div>
     );
   }
@@ -215,7 +221,7 @@ export default function Watch({
                 {data.uploaderVerified && <BadgeCheck className="w-4 h-4 text-yt-sub" />}
               </div>
               <div className="text-xs text-yt-sub">
-                {fmtViews(data.uploaderSubscriberCount)} مشترك
+                {fmtViews(data.uploaderSubscriberCount, lang)} {t("subscribers")}
               </div>
             </button>
             <button
@@ -228,7 +234,7 @@ export default function Watch({
                   : "bg-yt-text text-yt-bg hover:bg-white/80"
               }`}
             >
-              {isSubscribed(channelId) ? "مشترك ✓" : "اشتراك"}
+              {isSubscribed(channelId) ? t("subscribed") : t("subscribe")}
             </button>
           </div>
 
@@ -242,7 +248,7 @@ export default function Watch({
                 className={`flex items-center gap-2 h-9 ps-4 pe-3 text-sm font-medium hover:bg-yt-hover transition-colors ${liked ? "text-yt-blue" : ""}`}
               >
                 <ThumbsUp className={`w-5 h-5 ${liked ? "fill-current pop" : ""}`} />
-                <span className="tabular-nums">{fmtViews(data.likes + (liked ? 1 : 0))}</span>
+                <span className="tabular-nums">{fmtViews(data.likes + (liked ? 1 : 0), lang)}</span>
               </button>
               <span className="w-px h-5 bg-yt-hover" />
               <button
@@ -251,29 +257,30 @@ export default function Watch({
                   if (liked) onToggleLike();
                 }}
                 className={`h-9 px-3.5 hover:bg-yt-hover transition-colors ${disliked ? "text-yt-blue" : ""}`}
-                aria-label="لم يعجبني"
+                aria-label={t("dislike")}
               >
                 <ThumbsDown className={`w-5 h-5 ${disliked ? "fill-current pop" : ""}`} />
               </button>
             </div>
             <button
-              onClick={() => notify("تم نسخ الرابط 🔗")}
+              onClick={() => notify(t("linkCopied"))}
               className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
             >
-              <Share2 className="w-5 h-5" /> مشاركة
+              <Share2 className="w-5 h-5" /> {t("share")}
             </button>
             <button
-              onClick={() => notify("بدأ التنزيل في الخلفية")}
+              onClick={() => notify(t("downloadStartedToast"))}
               className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
             >
-              <Download className="w-5 h-5" /> <span className="hidden sm:inline">تنزيل</span>
+              <Download className="w-5 h-5" />{" "}
+              <span className="hidden sm:inline">{t("download")}</span>
             </button>
             <button
               onClick={() => onAddToPlaylist(video)}
               className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
             >
               <ListVideo className="w-5 h-5" />
-              <span className="hidden sm:inline">{isAr ? "حفظ" : "Save"}</span>
+              <span className="hidden sm:inline">{t("save")}</span>
             </button>
             {onMinimize && (
               <button
@@ -288,7 +295,7 @@ export default function Watch({
             )}
             <button
               className="w-9 h-9 rounded-full bg-yt-surface hover:bg-yt-hover grid place-items-center"
-              aria-label="المزيد"
+              aria-label={t("more")}
             >
               <MoreHorizontal className="w-5 h-5" />
             </button>
@@ -298,21 +305,23 @@ export default function Watch({
         {/* description */}
         <div className="mt-4 bg-yt-surface rounded-xl p-3 text-sm">
           <div className="font-bold flex flex-wrap gap-x-3">
-            <span>{fmtViews(data.views)} مشاهدة</span>
-            <span>{timeAgoAr(undefined, data.uploadDate)}</span>
+            <span>
+              {fmtViews(data.views, lang)} {t("views")}
+            </span>
+            <span>{timeAgo(undefined, data.uploadDate, lang)}</span>
             {data.category && <span className="text-yt-blue">#{data.category}</span>}
           </div>
           <p
             className={`mt-2 leading-relaxed text-yt-text/90 whitespace-pre-line ${expanded ? "" : "line-clamp-2"}`}
           >
-            {data.description || "لا يوجد وصف لهذا الفيديو."}
+            {data.description || t("noDescription")}
           </p>
           {data.description && (
             <button
               onClick={() => setExpanded((e) => !e)}
               className="font-bold mt-1 text-yt-sub hover:text-yt-text"
             >
-              {expanded ? "عرض أقل" : "...المزيد"}
+              {expanded ? t("showLess") : t("showMore")}
             </button>
           )}
         </div>
@@ -320,18 +329,20 @@ export default function Watch({
         {/* comments */}
         <section className="mt-6">
           <h2 className="font-display font-bold text-lg">
-            {(data.comments?.length || 0) > 0 ? `${data.comments!.length} تعليق` : "التعليقات"}
+            {(data.comments?.length || 0) > 0
+              ? `${data.comments!.length} ${isAr ? "تعليق" : "comments"}`
+              : t("comments")}
           </h2>
           <div className="flex gap-3 mt-4">
             <span className="w-10 h-10 rounded-full grid place-items-center text-sm font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black shrink-0">
-              أ
+              {isAr ? "أ" : "U"}
             </span>
             <input
-              placeholder="أضف تعليقاً..."
+              placeholder={t("writeComment")}
               className="flex-1 bg-transparent border-b border-yt-hover focus:border-yt-text outline-none pb-1.5 text-sm placeholder:text-yt-sub transition-colors"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.target as HTMLInputElement).value.trim()) {
-                  notify("تم نشر تعليقك (واجهة تجريبية)");
+                  notify(t("commentPostedToast"));
                   (e.target as HTMLInputElement).value = "";
                 }
               }}
@@ -339,7 +350,7 @@ export default function Watch({
           </div>
           <div className="mt-6 space-y-6">
             {!data.comments?.length && (
-              <p className="text-sm text-yt-sub py-4">لا توجد تعليقات معروضة لهذا الفيديو.</p>
+              <p className="text-sm text-yt-sub py-4">{t("noComments")}</p>
             )}
             {(data.comments || []).slice(0, 20).map((c, i) => (
               <CommentRow key={i} c={c} />
@@ -380,9 +391,21 @@ export default function Watch({
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />
-                <span className="absolute bottom-1 end-1 bg-black/80 text-white text-[11px] font-medium px-1 py-0.5 rounded">
-                  {fmtDuration(r.duration)}
-                </span>
+                {isLiveStream(r) ? (
+                  <span className="absolute bottom-1 end-1 bg-yt-red text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white live-dot" />
+                    {lang === "ar" ? "مباشر" : "LIVE"}
+                  </span>
+                ) : isShortsVideo(r) ? (
+                  <span className="absolute bottom-1 end-1 bg-black/85 text-white text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <ShortsIcon className="w-3 h-3 text-yt-red" />
+                    {fmtDuration(r.duration) || (lang === "ar" ? "شورتس" : "Shorts")}
+                  </span>
+                ) : fmtDuration(r.duration) ? (
+                  <span className="absolute bottom-1 end-1 bg-black/80 text-white text-[11px] font-medium px-1 py-0.5 rounded">
+                    {fmtDuration(r.duration)}
+                  </span>
+                ) : null}
               </div>
               <div className="flex-1 min-w-0">
                 <h4 className="text-sm font-medium leading-snug line-clamp-2">{r.title}</h4>
@@ -391,8 +414,8 @@ export default function Watch({
                   {r.uploaderVerified && <BadgeCheck className="w-3 h-3" />}
                 </div>
                 <div className="text-xs text-yt-sub">
-                  {fmtViews(r.views) && `${fmtViews(r.views)} مشاهدة · `}
-                  {timeAgoAr(r.uploaded, r.uploadedDate)}
+                  {fmtViews(r.views, lang) && `${fmtViews(r.views, lang)} ${t("views")} · `}
+                  {timeAgo(r.uploaded, r.uploadedDate, lang)}
                 </div>
               </div>
             </button>
@@ -415,6 +438,7 @@ function CommentRow({
     replyCount?: number;
   };
 }) {
+  const { t } = useLanguage();
   const [liked, setLiked] = useState(false);
   return (
     <div className="flex gap-3">
@@ -433,11 +457,11 @@ function CommentRow({
             <ThumbsUp className={`w-4 h-4 ${liked ? "fill-current text-yt-blue pop" : ""}`} />
             {c.likeCount + (liked ? 1 : 0)}
           </button>
-          <button className="hover:text-yt-text" aria-label="لم يعجبني">
+          <button className="hover:text-yt-text" aria-label={t("dislike")}>
             <ThumbsDown className="w-4 h-4" />
           </button>
           <button className="flex items-center gap-1.5 text-xs font-medium hover:text-yt-text">
-            <CornerDownLeft className="w-4 h-4" /> رد
+            <CornerDownLeft className="w-4 h-4" /> {t("reply")}
           </button>
         </div>
       </div>

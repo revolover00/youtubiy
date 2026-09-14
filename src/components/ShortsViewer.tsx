@@ -17,6 +17,7 @@ import type { PipedVideo } from "../lib/types";
 import { Avatar } from "./Feed";
 import YouTubePlayer from "./YouTubePlayer";
 import { ShortsIcon } from "./icons";
+import { useLanguage } from "../lib/i18n";
 
 interface Props {
   items: PipedVideo[];
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export default function ShortsViewer({ items, startIndex, onClose, notify }: Props) {
+  const { t } = useLanguage();
   const [active, setActive] = useState(startIndex);
   const [likes, setLikes] = useState<Record<string, boolean>>({});
   const [muted, setMuted] = useState(true);
@@ -59,20 +61,20 @@ export default function ShortsViewer({ items, startIndex, onClose, notify }: Pro
       <div className="h-14 shrink-0 flex items-center justify-between px-3 text-white">
         <div className="flex items-center gap-2">
           <ShortsIcon className="w-7 h-7 text-yt-red" />
-          <span className="font-display font-extrabold text-lg">شورتس</span>
+          <span className="font-display font-extrabold text-lg">{t("shorts")}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setMuted((m) => !m)}
             className="w-10 h-10 rounded-full hover:bg-white/10 grid place-items-center"
-            aria-label="الصوت"
+            aria-label={t("sound")}
           >
             {muted ? <VolumeX className="w-5 h-5 opacity-60" /> : <Volume2 className="w-5 h-5" />}
           </button>
           <button
             onClick={onClose}
             className="w-10 h-10 rounded-full hover:bg-white/10 grid place-items-center"
-            aria-label="إغلاق"
+            aria-label={t("close")}
           >
             <X className="w-6 h-6" />
           </button>
@@ -127,6 +129,7 @@ function ShortItem({
   onLike: () => void;
   notify: (m: string) => void;
 }) {
+  const { t, lang } = useLanguage();
   const id = videoIdFromUrl(video.url);
   const [failed, setFailed] = useState(false);
 
@@ -178,36 +181,42 @@ function ShortItem({
           <p className="text-sm font-medium leading-snug line-clamp-2">{video.title}</p>
           <div className="flex items-center gap-2 mt-2 text-xs">
             <Music2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate opacity-90">{fmtViews(video.views)} مشاهدة · صوت أصلي</span>
+            <span className="truncate opacity-90">
+              {fmtViews(video.views, lang)} {t("views")} · {t("originalAudio")}
+            </span>
           </div>
         </div>
 
         <div className="absolute end-2 bottom-3 flex flex-col items-center gap-4">
           <RailBtn
             icon={<ThumbsUp className={`w-6 h-6 ${liked ? "fill-current" : ""}`} />}
-            count={liked ? "12 ألف" : "11 ألف"}
+            count={fmtViews(liked ? 12000 : 11000, lang)}
             active={liked}
             onClick={onLike}
-            label="إعجاب"
+            label={t("like")}
           />
           <RailBtn
             icon={<ThumbsDown className="w-6 h-6" />}
-            onClick={() => notify("شكراً لتقييمك")}
-            label="لم يعجبني"
+            onClick={() => notify(t("thanksForFeedbackToast"))}
+            label={t("dislike")}
           />
           <RailBtn
             icon={<MessageCircle className="w-6 h-6" />}
             count="340"
-            onClick={() => notify("التعليقات قريباً")}
-            label="تعليقات"
+            onClick={() => notify(t("commentsSoonToast"))}
+            label={t("comments")}
           />
           <RailBtn
             icon={<Share2 className="w-6 h-6" />}
-            count="مشاركة"
-            onClick={() => notify("تم نسخ الرابط 🔗")}
-            label="مشاركة"
+            count={t("share")}
+            onClick={() => notify(t("linkCopied"))}
+            label={t("share")}
           />
-          <RailBtn icon={<MoreVertical className="w-6 h-6" />} onClick={() => {}} label="المزيد" />
+          <RailBtn
+            icon={<MoreVertical className="w-6 h-6" />}
+            onClick={() => {}}
+            label={t("more")}
+          />
         </div>
       </div>
     </div>

@@ -9,8 +9,14 @@
         "email": { "type": "string", "description": "Email address of the user" },
         "displayName": { "type": "string", "description": "Display name of the user" },
         "photoURL": { "type": "string", "description": "Avatar photo URL of the user" },
-        "createdAt": { "type": "string", "description": "Timestamp when the user account was created" },
-        "updatedAt": { "type": "string", "description": "Timestamp when the user account was last updated" }
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the user account was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the user account was last updated"
+        }
       },
       "required": ["userId", "email", "createdAt", "updatedAt"]
     },
@@ -20,7 +26,10 @@
       "type": "object",
       "properties": {
         "channelId": { "type": "string", "description": "The unique ID of the YouTube channel" },
-        "channelTitle": { "type": "string", "description": "The title or name of the YouTube channel" },
+        "channelTitle": {
+          "type": "string",
+          "description": "The title or name of the YouTube channel"
+        },
         "avatar": { "type": "string", "description": "Channel avatar URL" },
         "subscriberCount": { "type": "string", "description": "Subscriber count display string" },
         "addedAt": { "type": "string", "description": "Timestamp when subscribed" }

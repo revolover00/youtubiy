@@ -10,13 +10,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { auth, db, handleFirestoreError, OperationType } from "./firebase";
-import type {
-  HistoryRow,
-  Subscription,
-  VideoMeta,
-  UserPlaylist,
-  AppNotification,
-} from "./types";
+import type { HistoryRow, Subscription, VideoMeta, UserPlaylist, AppNotification } from "./types";
 
 /* ------------------------------------------------------------------ */
 /* Notifications: Firestore + Local Cache                             */
@@ -610,7 +604,11 @@ export async function createCustomPlaylist(title: string, description = ""): Pro
       updatedAt: playlist.updatedAt,
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/playlists/${playlist.id}`);
+    handleFirestoreError(
+      error,
+      OperationType.WRITE,
+      `users/${currentUser.uid}/playlists/${playlist.id}`,
+    );
   }
   return playlist;
 }
@@ -662,7 +660,11 @@ export async function addToPlaylist(playlistId: string, videoId: string): Promis
       updatedAt: pl.updatedAt,
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/playlists/${playlistId}`);
+    handleFirestoreError(
+      error,
+      OperationType.WRITE,
+      `users/${currentUser.uid}/playlists/${playlistId}`,
+    );
   }
 }
 
@@ -696,7 +698,11 @@ export async function removeFromPlaylist(playlistId: string, videoId: string): P
       updatedAt: pl.updatedAt,
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/playlists/${playlistId}`);
+    handleFirestoreError(
+      error,
+      OperationType.WRITE,
+      `users/${currentUser.uid}/playlists/${playlistId}`,
+    );
   }
 }
 

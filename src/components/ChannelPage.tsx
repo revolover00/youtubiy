@@ -28,25 +28,16 @@ export default function ChannelPage({
   onOpenShort,
   onAddToPlaylist,
 }: Props) {
-  const { t, isAr } = useLanguage();
+  const { t, lang } = useLanguage();
   const TABS = useMemo(
-    () =>
-      isAr
-        ? ([
-            { id: "home", label: "الرئيسية" },
-            { id: "videos", label: "الفيديوهات" },
-            { id: "shorts", label: "شورتس" },
-            { id: "playlists", label: "قوائم التشغيل" },
-            { id: "about", label: "عن القناة" },
-          ] as const)
-        : ([
-            { id: "home", label: "Home" },
-            { id: "videos", label: "Videos" },
-            { id: "shorts", label: "Shorts" },
-            { id: "playlists", label: "Playlists" },
-            { id: "about", label: "About" },
-          ] as const),
-    [isAr],
+    () => [
+      { id: "home", label: t("home") },
+      { id: "videos", label: t("videos") },
+      { id: "shorts", label: t("shorts") },
+      { id: "playlists", label: t("playlists") },
+      { id: "about", label: t("about") },
+    ],
+    [t],
   );
   const [tabId, setTabId] = useState<string>("home");
 
@@ -124,7 +115,7 @@ export default function ChannelPage({
     const el = loadMoreRef.current;
     const hasMore = tabId === "shorts" ? !!nextShorts : !!nextVideos;
     const isPaginatable = tabId === "videos" || tabId === "shorts" || tabId === "home";
-    
+
     if (!el || !hasMore || !isPaginatable) return;
 
     const io = new IntersectionObserver(
@@ -140,9 +131,7 @@ export default function ChannelPage({
   }, [tabId, nextVideos, nextShorts, loadMore]);
 
   if (error)
-    return (
-      <ErrorState onRetry={() => setAttempt((a) => a + 1)} message="تعذّر تحميل بيانات القناة." />
-    );
+    return <ErrorState onRetry={() => setAttempt((a) => a + 1)} message={t("channelLoadError")} />;
   if (!data)
     return (
       <div className="max-w-[1280px] mx-auto px-3 sm:px-6 pt-4">
@@ -152,10 +141,9 @@ export default function ChannelPage({
     );
 
   const videos = allVideos.filter((v) => v.url?.includes("/watch"));
-  const shorts = allShorts.length > 0
-      ? allShorts
-      : videos.filter((v) => v.duration > 0 && v.duration <= 60);
-  
+  const shorts =
+    allShorts.length > 0 ? allShorts : videos.filter((v) => v.duration > 0 && v.duration <= 60);
+
   const featured = videos[0];
   const cardProps = (v: PipedVideo, i: number) => ({
     video: v,
@@ -164,7 +152,7 @@ export default function ChannelPage({
     notify,
     onDismiss,
     onChannel: () => {},
-    onSaveLater: () => notify(isAr ? "تم الحفظ للمشاهدة لاحقاً ⏰" : "Saved to Watch Later ⏰"),
+    onSaveLater: () => notify(t("savedToWatchLaterToast")),
     onAddToPlaylist,
   });
 
@@ -198,15 +186,21 @@ export default function ChannelPage({
             {data.subscriberText ? (
               <span>{data.subscriberText}</span>
             ) : data.subscriberCount != null ? (
-              <span>{fmtViews(data.subscriberCount)} مشترك</span>
+              <span>
+                {fmtViews(data.subscriberCount, lang)} {t("subscribers")}
+              </span>
             ) : null}
             <span>·</span>
             {data.videoCountText ? (
               <span>{data.videoCountText}</span>
             ) : data.videoCount != null ? (
-              <span>{fmtViews(data.videoCount)} فيديو</span>
+              <span>
+                {fmtViews(data.videoCount, lang)} {t("videosWord")}
+              </span>
             ) : (
-              <span>{videos.length}+ فيديو</span>
+              <span>
+                {videos.length}+ {t("videosWord")}
+              </span>
             )}
           </div>
           <p className="text-sm text-yt-sub mt-2 max-w-xl line-clamp-1 mx-auto sm:mx-0">
@@ -222,13 +216,13 @@ export default function ChannelPage({
               }`}
             >
               {isSubscribed && <Bell className="w-4 h-4" />}
-              {isSubscribed ? "مشترك" : "اشتراك"}
+              {isSubscribed ? t("subscribed") : t("subscribe")}
             </button>
             <button
-              onClick={() => notify("تم نسخ رابط القناة 🔗")}
+              onClick={() => notify(t("channelLinkCopied"))}
               className="h-9 px-4 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium flex items-center gap-2"
             >
-              <Share2 className="w-4 h-4" /> مشاركة
+              <Share2 className="w-4 h-4" /> {t("share")}
             </button>
           </div>
         </div>
@@ -236,20 +230,20 @@ export default function ChannelPage({
 
       <div className="mt-6 border-b border-yt-border px-2 sm:px-6 sticky top-14 bg-yt-bg z-30">
         <div className="flex gap-1 overflow-x-auto no-scrollbar">
-          {TABS.map((t) => (
+          {TABS.map((tItem) => (
             <button
-              key={t.id}
-              onClick={() => setTabId(t.id)}
+              key={tItem.id}
+              onClick={() => setTabId(tItem.id)}
               className={`shrink-0 px-4 py-3 text-sm font-bold border-b-2 -mb-px transition-colors ${
-                tabId === t.id
+                tabId === tItem.id
                   ? "border-yt-text text-yt-text"
                   : "border-transparent text-yt-sub hover:text-yt-text"
               }`}
             >
-              {t.label}
+              {tItem.label}
             </button>
           ))}
-          <button className="shrink-0 px-3 py-3 text-yt-sub" aria-label="بحث في القناة">
+          <button className="shrink-0 px-3 py-3 text-yt-sub" aria-label={t("searchInChannel")}>
             <Search className="w-5 h-5" />
           </button>
         </div>
@@ -274,12 +268,13 @@ export default function ChannelPage({
                   </div>
                 </button>
                 <div className="md:pt-2">
-                  <span className="text-xs text-yt-sub">{isAr ? "فيديو مميّز" : "Featured Video"}</span>
+                  <span className="text-xs text-yt-sub">{t("featuredVideo")}</span>
                   <h2 className="font-display font-bold text-lg sm:text-xl mt-1 leading-snug">
                     {featured.title}
                   </h2>
                   <p className="text-sm text-yt-sub mt-2">
-                    {fmtViews(featured.views) && `${fmtViews(featured.views)} ${isAr ? "مشاهدة" : "views"}`}
+                    {fmtViews(featured.views, lang) &&
+                      `${fmtViews(featured.views, lang)} ${t("views")}`}
                   </p>
                   <p className="text-sm text-yt-text/80 mt-3 leading-relaxed line-clamp-3">
                     {data.description}
@@ -291,7 +286,7 @@ export default function ChannelPage({
               <div className="pt-4 border-t border-yt-border">
                 <div className="flex items-center gap-2 mb-4">
                   <ShortsIcon className="w-5 h-5 text-yt-red" />
-                  <h3 className="font-display font-bold text-lg">{isAr ? "شورتس" : "Shorts"}</h3>
+                  <h3 className="font-display font-bold text-lg">{t("shorts")}</h3>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                   {shorts.slice(0, 6).map((s, i) => (
@@ -308,7 +303,7 @@ export default function ChannelPage({
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         />
                         <span className="absolute top-2 end-2 flex items-center gap-1 text-[11px] font-bold bg-black/60 rounded px-1.5 py-0.5">
-                          <ShortsIcon className="w-3 h-3" /> {fmtViews(s.views)}
+                          <ShortsIcon className="w-3 h-3" /> {fmtViews(s.views, lang)}
                         </span>
                       </div>
                       <p className="text-[13px] mt-2 line-clamp-2 leading-snug">{s.title}</p>
@@ -352,7 +347,7 @@ export default function ChannelPage({
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
                     <span className="absolute top-2 end-2 flex items-center gap-1 text-[11px] font-bold bg-black/50 rounded px-1.5 py-0.5">
-                      <ShortsIcon className="w-3 h-3" /> {fmtViews(s.views)}
+                      <ShortsIcon className="w-3 h-3" /> {fmtViews(s.views, lang)}
                     </span>
                   </div>
                   <p className="text-[13px] mt-2 line-clamp-2 leading-snug">{s.title}</p>
@@ -360,39 +355,45 @@ export default function ChannelPage({
               ))}
             </div>
           ) : (
-            <div className="py-20 text-center text-yt-sub text-sm">
-              {isAr ? "لا توجد مقاطع قصيرة في هذه القناة" : "No shorts available for this channel"}
-            </div>
+            <div className="py-20 text-center text-yt-sub text-sm">{t("noShortsInChannel")}</div>
           ))}
 
         {tabId === "playlists" && (
-          <div className="py-20 text-center text-yt-sub text-sm">
-            {isAr ? "قوائم التشغيل غير متاحة حالياً" : "Playlists are not available currently"}
-          </div>
+          <div className="py-20 text-center text-yt-sub text-sm">{t("playlistsNotAvailable")}</div>
         )}
 
         {tabId === "about" && (
           <div className="max-w-2xl rise">
-            <h3 className="font-display font-bold text-lg mb-3">{isAr ? "الوصف" : "Description"}</h3>
+            <h3 className="font-display font-bold text-lg mb-3">{t("description")}</h3>
             <p className="text-sm leading-relaxed text-yt-text/90 whitespace-pre-line">
-              {data.description || (isAr ? "لا يوجد وصف." : "No description.")}
+              {data.description || t("noDescription")}
             </p>
             <hr className="border-yt-border my-6" />
-            <h3 className="font-display font-bold text-lg mb-3">{isAr ? "التفاصيل" : "Details"}</h3>
+            <h3 className="font-display font-bold text-lg mb-3">{t("details")}</h3>
             <ul className="space-y-2.5 text-sm text-yt-sub">
               {data.subscriberText ? (
                 <li>👥 {data.subscriberText}</li>
               ) : data.subscriberCount != null ? (
-                <li>👥 {fmtViews(data.subscriberCount)} {isAr ? "مشترك" : "subscribers"}</li>
+                <li>
+                  👥 {fmtViews(data.subscriberCount, lang)} {t("subscribers")}
+                </li>
               ) : null}
               {data.videoCountText ? (
                 <li>🎬 {data.videoCountText}</li>
               ) : data.videoCount != null ? (
-                <li>🎬 {fmtViews(data.videoCount)} {isAr ? "فيديو" : "videos"}</li>
+                <li>
+                  🎬 {fmtViews(data.videoCount, lang)} {t("videosWord")}
+                </li>
               ) : (
-                <li>🎬 {videos.length}+ {isAr ? "فيديو منشور" : "videos published"}</li>
+                <li>
+                  🎬 {videos.length}+ {t("videosPublished")}
+                </li>
               )}
-              {shorts.length > 0 && <li>⚡ {shorts.length} {isAr ? "مقطع شورتس" : "shorts"}</li>}
+              {shorts.length > 0 && (
+                <li>
+                  ⚡ {shorts.length} {t("shorts")}
+                </li>
+              )}
               <li>🆔 {channelId}</li>
             </ul>
           </div>
@@ -407,7 +408,7 @@ export default function ChannelPage({
               onClick={() => void loadMore()}
               className="h-9 px-5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium transition-colors"
             >
-              {isAr ? "تحميل المزيد" : "Load more"}
+              {t("loadMore")}
             </button>
           ) : null}
         </div>

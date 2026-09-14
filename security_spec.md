@@ -1,6 +1,7 @@
 # Security Specification
 
 ## 1. Data Invariants
+
 1. User Profile documents at `/users/{userId}` can only be read or written by the authenticated user whose `request.auth.uid == userId`.
 2. All subcollections (`subscriptions`, `history`, `liked`, `watchLater`) reside under `/users/{userId}/...` and can only be accessed by the authentic owner (`request.auth.uid == userId`).
 3. Document IDs in subcollections must be valid identifiers (channelId or videoId matching regex and size limit).
@@ -9,6 +10,7 @@
 6. A default-deny catch-all rule enforces zero-trust access across the entire database.
 
 ## 2. The Dirty Dozen Malicious Payloads
+
 1. **Unauthenticated Read**: Attempt to read `/users/victim_123` without auth token.
 2. **Unauthenticated Write**: Attempt to write to `/users/victim_123` without auth token.
 3. **Cross-User Profile Write**: Attacker authenticated as `user_abc` attempts to overwrite `/users/user_xyz`.

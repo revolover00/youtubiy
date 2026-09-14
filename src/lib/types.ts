@@ -1,6 +1,8 @@
 export interface PipedVideo {
   url: string;
   type?: string;
+  isLive?: boolean;
+  isShort?: boolean;
   title: string;
   thumbnail: string;
   uploaderName: string;

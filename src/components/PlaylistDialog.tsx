@@ -48,21 +48,24 @@ export default function PlaylistDialog({ open, onClose, video, notify }: Props) 
     onClose();
   };
 
-  const filtered = playlists.filter((p) =>
-    p.title.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = playlists.filter((p) => p.title.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      
-      <div 
+
+      <div
         className="relative w-full max-w-md bg-yt-raised border border-yt-border rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200"
         dir={dir}
       >
         <div className="flex items-center justify-between p-4 border-b border-yt-border">
-          <h2 className="font-bold text-lg">{isAr ? "إضافة إلى قائمة تشغيل" : "Add to playlist"}</h2>
-          <button onClick={onClose} className="p-1 hover:bg-yt-surface rounded-full transition-colors">
+          <h2 className="font-bold text-lg">
+            {isAr ? "إضافة إلى قائمة تشغيل" : "Add to playlist"}
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-yt-surface rounded-full transition-colors"
+          >
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -93,14 +96,20 @@ export default function PlaylistDialog({ open, onClose, video, notify }: Props) 
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-yt-bg border border-yt-border flex items-center justify-center shrink-0">
                           {pl.thumbnail ? (
-                            <img src={pl.thumbnail} className="w-full h-full object-cover rounded-lg" alt="" />
+                            <img
+                              src={pl.thumbnail}
+                              className="w-full h-full object-cover rounded-lg"
+                              alt=""
+                            />
                           ) : (
                             <ListVideo className="w-5 h-5 text-yt-sub opacity-40" />
                           )}
                         </div>
                         <div>
                           <p className="font-medium text-sm line-clamp-1">{pl.title}</p>
-                          <p className="text-xs text-yt-sub">{pl.videoIds.length} {isAr ? "فيديو" : "videos"}</p>
+                          <p className="text-xs text-yt-sub">
+                            {pl.videoIds.length} {isAr ? "فيديو" : "videos"}
+                          </p>
                         </div>
                       </div>
                       {exists && <Check className="w-5 h-5 text-yt-blue" />}
@@ -110,7 +119,9 @@ export default function PlaylistDialog({ open, onClose, video, notify }: Props) 
                 {filtered.length === 0 && !search && (
                   <div className="py-8 text-center space-y-2">
                     <ListVideo className="w-10 h-10 text-yt-sub opacity-20 mx-auto" />
-                    <p className="text-sm text-yt-sub">{isAr ? "لا توجد قوائم تشغيل بعد" : "No playlists yet"}</p>
+                    <p className="text-sm text-yt-sub">
+                      {isAr ? "لا توجد قوائم تشغيل بعد" : "No playlists yet"}
+                    </p>
                   </div>
                 )}
               </div>

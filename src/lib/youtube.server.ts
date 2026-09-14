@@ -135,14 +135,41 @@ function fromVideoRenderer(r: Json): PipedVideo | null {
     collect(byline, "browseEndpoint")[0]?.browseId ??
     collect(r, "browseEndpoint")[0]?.browseId ??
     "";
-  
+
   // Robust thumbnail selection
   const thumbs = r.thumbnail?.thumbnails ?? [];
-  const thumbnail = thumbs.length > 0 ? (thumbs.at(-1)?.url || thumbFor(id)) : thumbFor(id);
+  const thumbnail = thumbs.length > 0 ? thumbs.at(-1)?.url || thumbFor(id) : thumbFor(id);
+
+  const badgesStr = JSON.stringify(r.badges ?? []);
+  const overlaysStr = JSON.stringify(r.thumbnailOverlays ?? []);
+  const viewStr = text(r.viewCountText);
+  const timeStr = text(r.publishedTimeText);
+  const durSec = parseDuration(text(r.lengthText));
+
+  // Determine if it is an active Live stream
+  const isLive =
+    badgesStr.includes("LIVE") ||
+    badgesStr.includes("مباشر") ||
+    badgesStr.includes("BADGE_STYLE_TYPE_LIVE_NOW") ||
+    overlaysStr.includes('"style":"LIVE"') ||
+    /watching|مشاهدة حالياً|يشاهد الآن/i.test(viewStr) ||
+    /بث مباشر|\blive stream\b/i.test(title);
+
+  // Determine if it is a Short
+  const isShort =
+    !isLive &&
+    (overlaysStr.includes('"style":"SHORTS"') ||
+      /#shorts\b|#short\b/i.test(title) ||
+      (durSec > 0 &&
+        durSec <= 60 &&
+        !timeStr.includes("مباشر") &&
+        !timeStr.toLowerCase().includes("live")));
 
   return {
     url: `/watch?v=${id}`,
-    type: "stream",
+    type: isLive ? "live" : isShort ? "shorts" : "stream",
+    isLive,
+    isShort,
     title,
     thumbnail,
     uploaderName: text(byline) || "YouTube",
@@ -151,9 +178,9 @@ function fromVideoRenderer(r: Json): PipedVideo | null {
       ? collect(r, "thumbnails")[1]?.[0]?.url
       : undefined,
     uploaderVerified: JSON.stringify(r.ownerBadges ?? []).includes("VERIFIED"),
-    uploadedDate: text(r.publishedTimeText),
-    duration: parseDuration(text(r.lengthText)),
-    views: parseCount(text(r.viewCountText)),
+    uploadedDate: isLive ? "مباشر" : timeStr,
+    duration: isLive ? 0 : durSec,
+    views: parseCount(viewStr),
     description: text(r.detailedMetadataSnippets?.[0]?.snippetText),
   };
 }
@@ -185,18 +212,35 @@ function fromLockup(r: Json): PipedVideo | null {
   }
 
   const badge = collect(r.contentImage, "thumbnailBadgeViewModel")[0];
+  const badgeText = (badge?.text ?? "").trim();
+  const contentImageStr = JSON.stringify(r.contentImage ?? "");
+
+  const isLive =
+    /LIVE|مباشر|بث مباشر/i.test(badgeText) ||
+    contentImageStr.includes('"style":"LIVE"') ||
+    /بث مباشر|\blive stream\b/i.test(title);
+
+  const durSec = isLive ? 0 : parseDuration(badgeText);
+  const isShort =
+    !isLive &&
+    (r.contentType === "LOCKUP_CONTENT_TYPE_SHORTS" ||
+      /#shorts\b|#short\b/i.test(title) ||
+      (durSec > 0 && durSec <= 60));
+
   const channelId = collect(meta?.image, "browseEndpoint")[0]?.browseId ?? "";
 
   return {
     url: `/watch?v=${id}`,
-    type: "stream",
+    type: isLive ? "live" : isShort ? "shorts" : "stream",
+    isLive,
+    isShort,
     title,
     thumbnail: collect(r.contentImage, "sources")[0]?.at(-1)?.url ?? thumbFor(id),
     uploaderName: channelName,
     uploaderUrl: channelId ? `/channel/${channelId}` : undefined,
     uploaderAvatar: collect(meta?.image, "sources")[0]?.[0]?.url,
-    uploadedDate,
-    duration: parseDuration(badge?.text ?? ""),
+    uploadedDate: isLive ? "مباشر" : uploadedDate,
+    duration: isLive ? 0 : durSec,
     views,
   };
 }
@@ -289,11 +333,13 @@ function fromReelItem(r: Json): PipedVideo | null {
   if (!id || !title) return null;
   return {
     url: `/watch?v=${id}`,
-    type: "stream",
+    type: "shorts",
+    isShort: true,
+    isLive: false,
     title,
     thumbnail: r.thumbnail?.thumbnails?.at(-1)?.url ?? thumbFor(id),
-    uploaderName: "Shorts",
-    duration: 0,
+    uploaderName: text(r.navigationEndpoint?.reelWatchEndpoint?.channelName) || "Shorts",
+    duration: 30,
     views: parseCount(text(r.viewCountText)),
   };
 }
@@ -314,11 +360,13 @@ function fromShortsLockup(s: Json): PipedVideo | null {
 
   return {
     url: `/watch?v=${videoId}`,
-    type: "stream",
+    type: "shorts",
+    isShort: true,
+    isLive: false,
     title,
     thumbnail: thumb,
     uploaderName: "Shorts",
-    duration: 0,
+    duration: 30,
     views,
   };
 }

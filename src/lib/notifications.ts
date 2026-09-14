@@ -8,15 +8,15 @@ export async function refreshNotifications() {
     if (!subs.length) return;
 
     // To avoid hitting API limits too hard, we check a few channels at a time
-    // or we could check all if the list is small. 
+    // or we could check all if the list is small.
     // For now, let's check the first 10 subs.
     const targetSubs = subs.slice(0, 10);
-    
+
     for (const sub of targetSubs) {
       try {
         const channel = await getChannel(sub.channel_id);
         const latestVideo = (channel.relatedStreams || [])[0];
-        
+
         if (latestVideo) {
           const videoId = videoIdFromUrl(latestVideo.url);
           if (!videoId) continue;

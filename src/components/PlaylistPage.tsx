@@ -78,7 +78,9 @@ export default function PlaylistPage(props: Props) {
       <div className="max-w-[1400px] mx-auto px-3 sm:px-6 pt-6">
         <ErrorState
           onRetry={() => setAttempt((a) => a + 1)}
-          message={isAr ? "تعذّر فتح قائمة التشغيل، حاول مرة أخرى." : "Failed to open playlist, try again."}
+          message={
+            isAr ? "تعذّر فتح قائمة التشغيل، حاول مرة أخرى." : "Failed to open playlist, try again."
+          }
         />
       </div>
     );
@@ -151,7 +153,9 @@ export default function PlaylistPage(props: Props) {
 
       <div className="flex-1 min-w-0">
         {list.length === 0 ? (
-          <EmptyState message={isAr ? "لا توجد مقاطع في هذه القائمة." : "No videos in this playlist."} />
+          <EmptyState
+            message={isAr ? "لا توجد مقاطع في هذه القائمة." : "No videos in this playlist."}
+          />
         ) : (
           <div className="space-y-3">
             {list.map((v, i) => (

@@ -14,8 +14,16 @@ export function channelIdFromUrl(u = ""): string {
   return m ? m[1] : u;
 }
 
-export function fmtDuration(s?: number, lang: "en" | "ar" = "en"): string {
-  if (s == null || s <= 0) return lang === "ar" ? "مباشر" : "LIVE";
+export function getCurrentLang(): "en" | "ar" {
+  if (typeof window !== "undefined") {
+    const saved = localStorage.getItem("yt_lang");
+    if (saved === "ar" || saved === "en") return saved;
+  }
+  return "en";
+}
+
+export function fmtDuration(s?: number): string {
+  if (s == null || s <= 0 || isNaN(s)) return "";
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = Math.floor(s % 60);
@@ -23,7 +31,79 @@ export function fmtDuration(s?: number, lang: "en" | "ar" = "en"): string {
   return `${h ? h + ":" : ""}${mm}:${String(sec).padStart(2, "0")}`;
 }
 
-export function fmtViews(n?: number | null, lang: "en" | "ar" = "ar"): string {
+export function isLiveStream(v?: {
+  duration?: number;
+  type?: string;
+  isLive?: boolean;
+  isShort?: boolean;
+  title?: string;
+  uploadedDate?: string;
+  uploaderName?: string;
+}): boolean {
+  if (!v) return false;
+  // If explicitly designated as short, it cannot be a live stream
+  if (v.isShort === true || v.type === "shorts" || v.uploaderName === "Shorts") return false;
+  if (v.isLive === true || v.type === "live" || v.type === "live_stream") return true;
+
+  const title = (v.title || "").toLowerCase();
+  const date = (v.uploadedDate || "").toLowerCase();
+
+  // Shorts tags exclude live status
+  if (title.includes("#shorts") || title.includes("#short")) return false;
+
+  const hasLiveKeywords =
+    date.includes("مباشر") ||
+    date.includes("live") ||
+    date.includes("بدأ البث") ||
+    date.includes("started streaming") ||
+    date.includes("watching") ||
+    date.includes("مشاهدة حالياً") ||
+    date.includes("يشاهد الآن") ||
+    title.includes("بث مباشر") ||
+    title.includes("live stream") ||
+    title.includes("🔴") ||
+    /\b(stream|streaming) now\b/i.test(title) ||
+    /\[live\]|\(live\)/i.test(title);
+
+  return (v.duration == null || v.duration === 0) && hasLiveKeywords;
+}
+
+export function isShortsVideo(v?: {
+  duration?: number;
+  type?: string;
+  isLive?: boolean;
+  isShort?: boolean;
+  title?: string;
+  url?: string;
+  uploaderName?: string;
+  uploadedDate?: string;
+}): boolean {
+  if (!v) return false;
+  if (isLiveStream(v)) return false;
+  if (v.isShort === true || v.type === "shorts" || v.uploaderName === "Shorts") return true;
+
+  const title = (v.title || "").toLowerCase();
+  if (title.includes("#shorts") || title.includes("#short")) return true;
+  if (v.url && (v.url.includes("/shorts/") || v.url.includes("shorts="))) return true;
+
+  const dur = v.duration ?? 0;
+  return dur > 0 && dur <= 60;
+}
+
+export function isStandardVideo(v?: {
+  duration?: number;
+  type?: string;
+  isLive?: boolean;
+  isShort?: boolean;
+  title?: string;
+  url?: string;
+  uploaderName?: string;
+  uploadedDate?: string;
+}): boolean {
+  return !isLiveStream(v) && !isShortsVideo(v);
+}
+
+export function fmtViews(n?: number | null, lang: "en" | "ar" = getCurrentLang()): string {
   if (n == null || isNaN(n)) return "";
   const formatter = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
     notation: "compact",
@@ -96,7 +176,7 @@ const EN_UNITS: [number, string, string][] = [
 export function timeAgo(
   uploaded?: number,
   uploadedDate?: string,
-  lang: "en" | "ar" = "en",
+  lang: "en" | "ar" = getCurrentLang(),
 ): string {
   const d = ageDays(uploaded, uploadedDate);
   if (d < 1 / 1440) return lang === "ar" ? "الآن" : "Just now";
@@ -121,6 +201,10 @@ export function timeAgo(
   return "الآن";
 }
 
-export function timeAgoAr(uploaded?: number, uploadedDate?: string): string {
-  return timeAgo(uploaded, uploadedDate, "ar");
+export function timeAgoAr(
+  uploaded?: number,
+  uploadedDate?: string,
+  lang: "en" | "ar" = getCurrentLang(),
+): string {
+  return timeAgo(uploaded, uploadedDate, lang);
 }

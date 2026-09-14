@@ -67,7 +67,10 @@ function FullContent({
   onNavigate,
   onHome,
   onOpenSettings,
-}: Pick<Props, "active" | "subs" | "onNavigate" | "onHome" | "onOpenSettings" | "customPlaylists">) {
+}: Pick<
+  Props,
+  "active" | "subs" | "onNavigate" | "onHome" | "onOpenSettings" | "customPlaylists"
+>) {
   const { t, isAr } = useLanguage();
 
   const MAIN = [

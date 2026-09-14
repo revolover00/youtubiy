@@ -12,7 +12,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ShortsIcon } from "./icons";
-import { fmtDuration, fmtViews, timeAgo, videoIdFromUrl } from "../lib/format";
+import {
+  fmtDuration,
+  fmtViews,
+  isLiveStream,
+  isShortsVideo,
+  timeAgo,
+  videoIdFromUrl,
+} from "../lib/format";
 import type { PipedVideo, SearchChannel, SearchPlaylist } from "../lib/types";
 import { useLanguage } from "../lib/i18n";
 import {
@@ -277,8 +284,9 @@ export function VideoCard({
     />
   );
 
-  const durationStr = fmtDuration(video.duration, lang);
-  const isLive = durationStr === "LIVE" || durationStr === "مباشر";
+  const isLive = isLiveStream(video);
+  const isShort = isShortsVideo(video);
+  const durationStr = fmtDuration(video.duration);
 
   const thumb = (
     <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised">
@@ -289,13 +297,21 @@ export function VideoCard({
         referrerPolicy="no-referrer"
         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
       />
-      <span
-        className={`absolute bottom-1.5 end-1.5 text-white text-xs font-semibold px-1.5 py-0.5 rounded ${
-          isLive ? "bg-yt-red flex items-center gap-1 font-bold" : "bg-black/80"
-        }`}
-      >
-        {durationStr}
-      </span>
+      {isLive ? (
+        <span className="absolute bottom-1.5 end-1.5 bg-yt-red text-white text-[11px] sm:text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1.5 shadow-md">
+          <span className="w-2 h-2 rounded-full bg-white live-dot" />
+          <span>{lang === "ar" ? "مباشر" : "LIVE"}</span>
+        </span>
+      ) : isShort ? (
+        <span className="absolute bottom-1.5 end-1.5 bg-black/85 text-white text-[11px] sm:text-xs font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+          <ShortsIcon className="w-3.5 h-3.5 text-yt-red" />
+          <span>{durationStr || (lang === "ar" ? "شورتس" : "Shorts")}</span>
+        </span>
+      ) : durationStr ? (
+        <span className="absolute bottom-1.5 end-1.5 text-white text-xs font-semibold px-1.5 py-0.5 rounded bg-black/80">
+          {durationStr}
+        </span>
+      ) : null}
       {saved && (
         <span className="absolute top-2 end-2 bg-black/75 text-white text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
           <Clock className="w-3 h-3" /> {lang === "ar" ? "محفوظ" : "Saved"}

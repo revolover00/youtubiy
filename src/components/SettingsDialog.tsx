@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { X, Globe, Moon, Trash2, Check, AlertCircle, Play, Download, Smartphone } from "lucide-react";
+import {
+  X,
+  Globe,
+  Moon,
+  Trash2,
+  Check,
+  AlertCircle,
+  Play,
+  Download,
+  Smartphone,
+} from "lucide-react";
 import { useLanguage, type Language } from "../lib/i18n";
 import { clearHistory, setBackgroundPlay as persistBackgroundPlay } from "../lib/store";
 import { useAppStore, appStore } from "../lib/appStore";
@@ -25,7 +35,7 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
     const next = !backgroundPlay;
     appStore.setBackgroundPlay(next);
     persistBackgroundPlay(next);
-    notify(isAr ? "تم تحديث إعدادات التشغيل" : "Playback settings updated");
+    notify(t("playbackUpdatedToast"));
   };
 
   const handleClearHistory = async () => {
@@ -124,21 +134,13 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
               <Play className="w-5 h-5 text-yt-blue" />
               <span>{t("settingsBackgroundPlay")}</span>
             </div>
-            <p className="text-xs text-yt-sub leading-relaxed">
-              {t("settingsBackgroundPlayDesc")}
-            </p>
+            <p className="text-xs text-yt-sub leading-relaxed">{t("settingsBackgroundPlayDesc")}</p>
             <button
               onClick={toggleBackgroundPlay}
               className="w-full flex items-center justify-between p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface transition-colors"
             >
               <span className="text-sm font-medium">
-                {backgroundPlay
-                  ? isAr
-                    ? "مفعّل"
-                    : "Enabled"
-                  : isAr
-                    ? "معطّل"
-                    : "Disabled"}
+                {backgroundPlay ? t("enabled") : t("disabled")}
               </span>
               <div
                 className={`w-12 h-6 rounded-full transition-colors relative ${
@@ -183,27 +185,21 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
                 className="w-full flex items-center justify-center gap-2 p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface text-yt-text font-medium transition-all"
               >
                 <Download className="w-4 h-4" />
-                <span>{isAr ? "تثبيت على iOS" : "Install on iOS"}</span>
+                <span>{t("installIOS")}</span>
               </button>
             ) : null}
 
             {showIOSGuide && (
               <div className="p-4 rounded-xl bg-yt-surface border border-yt-border space-y-3 animate-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold">
-                    {isAr ? "التثبيت على iPhone / iPad" : "Install on iPhone / iPad"}
-                  </h4>
+                  <h4 className="text-sm font-bold">{t("installIOSHeading")}</h4>
                   <button onClick={() => setShowIOSGuide(false)}>
                     <X className="w-4 h-4 text-yt-sub" />
                   </button>
                 </div>
                 <div className="text-xs text-yt-sub space-y-2">
-                  <p>
-                    1. {isAr ? "اضغط على زر المشاركة في متصفح Safari." : "Tap the Share button in Safari toolbar."}
-                  </p>
-                  <p>
-                    2. {isAr ? "مرر للأسفل واضغط على 'إضافة إلى الشاشة الرئيسية'." : "Scroll down and tap 'Add to Home Screen'."}
-                  </p>
+                  <p>{t("installIOSStep1")}</p>
+                  <p>{t("installIOSStep2")}</p>
                 </div>
               </div>
             )}
@@ -221,11 +217,7 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
               <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/50 space-y-3">
                 <div className="flex items-start gap-2.5 text-red-300">
                   <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                  <p className="text-xs">
-                    {lang === "ar"
-                      ? "هل أنت متأكد من رغبتك في محو سجل المشاهدة بالكامل؟ لا يمكن التراجع عن هذا الإجراء."
-                      : "Are you sure you want to clear your entire watch history? This action cannot be undone."}
-                  </p>
+                  <p className="text-xs">{t("confirmClearHistory")}</p>
                 </div>
                 <div className="flex items-center gap-2 justify-end pt-1">
                   <button
@@ -238,7 +230,7 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
                     onClick={handleClearHistory}
                     className="px-3.5 py-1.5 rounded-lg bg-yt-red hover:bg-red-600 text-white text-xs font-bold"
                   >
-                    {lang === "ar" ? "نعم، امسح السجل" : "Yes, clear history"}
+                    {t("yesClearHistory")}
                   </button>
                 </div>
               </div>
@@ -251,11 +243,7 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
                   <span className="text-sm font-medium text-red-400 block">
                     {t("settingsClearHistory")}
                   </span>
-                  <span className="text-xs text-yt-sub">
-                    {lang === "ar"
-                      ? "حذف جميع مقاطع الفيديو التي تمت مشاهدتها من السجل"
-                      : "Remove all watched videos from this device"}
-                  </span>
+                  <span className="text-xs text-yt-sub">{t("clearHistorySubtitle")}</span>
                 </div>
                 <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
               </button>

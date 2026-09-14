@@ -74,11 +74,10 @@ export default function YouTubePlayer({
       // Send the listening event to the iframe to enable infoDelivery messages
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: "listening", id: 1, channel: "widget" }),
-        "*"
+        "*",
       );
     }
   };
-
 
   useEffect(() => {
     // Keep YouTube playing when tab is hidden or backgrounded (if enabled)
@@ -91,7 +90,7 @@ export default function YouTubePlayer({
           if (!iframeRef.current?.contentWindow) return;
           iframeRef.current.contentWindow.postMessage(
             JSON.stringify({ event: "command", func: "playVideo", args: [] }),
-            "*"
+            "*",
           );
         };
         // Sequence of play commands to fight YouTube's internal blur pause logic
@@ -136,7 +135,7 @@ export default function YouTubePlayer({
       if (iframeRef.current?.contentWindow) {
         iframeRef.current.contentWindow.postMessage(
           JSON.stringify({ event: "command", func, args }),
-          "*"
+          "*",
         );
       }
     };

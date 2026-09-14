@@ -121,7 +121,7 @@ function idsToVideos(ids: string[]): PipedVideo[] {
 
 export default function LibraryPage(props: Props) {
   const { page } = props;
-  const { t, isAr } = useLanguage();
+  const { t } = useLanguage();
   const normalized = normalizeKey(page);
 
   const [customPlaylists, setCustomPlaylists] = useState<UserPlaylist[]>([]);
@@ -140,7 +140,7 @@ export default function LibraryPage(props: Props) {
     setCustomPlaylists((prev) => [pl, ...prev]);
     setNewTitle("");
     setShowCreate(false);
-    props.notify(isAr ? "تم إنشاء قائمة التشغيل" : "Playlist created");
+    props.notify(t("playlistCreatedToast"));
   };
 
   const metaMap: Record<
@@ -155,22 +155,18 @@ export default function LibraryPage(props: Props) {
     history: {
       icon: History,
       title: t("history"),
-      empty: isAr
-        ? "لا يوجد سجل مشاهدة بعد — ابدأ بمشاهدة فيديو!"
-        : "No watch history yet — start watching videos!",
+      empty: t("historyEmptyMessage"),
     },
     watchLater: {
       icon: Clock,
       title: t("watchLater"),
-      empty: isAr
-        ? "لم تحفظ أي فيديو بعد للمشاهدة لاحقاً."
-        : "You haven't saved any videos to Watch Later yet.",
+      empty: t("watchLaterEmptyMessage"),
       playlist: true,
     },
     liked: {
       icon: ThumbsUp,
       title: t("likedVideos"),
-      empty: isAr ? "لم تعجبك أي مقاطع بعد." : "No liked videos yet.",
+      empty: t("likedVideosEmptyMessage"),
       playlist: true,
     },
     playlists: {
@@ -181,48 +177,44 @@ export default function LibraryPage(props: Props) {
     videos: {
       icon: PlayCircle,
       title: t("yourVideos"),
-      empty: isAr
-        ? "هذه واجهة مشاهدة فقط — لا توجد مقاطع خاصة بك."
-        : "This is a viewer client — no personal uploads found.",
+      empty: t("yourVideosEmptyMessage"),
     },
     downloads: {
       icon: Download,
       title: t("downloads"),
-      empty: isAr
-        ? "لا توجد تنزيلات محفوظة على هذا الجهاز."
-        : "No downloads stored on this device.",
+      empty: t("downloadsEmptyMessage"),
     },
     trending: {
       icon: Flame,
       title: t("trending"),
-      empty: isAr ? "لا يوجد محتوى رائج حالياً." : "No trending content right now.",
+      empty: t("trendingEmptyMessage"),
     },
     music: {
       icon: Music2,
       title: t("music"),
-      empty: isAr ? "لا توجد نتائج." : "No results.",
+      empty: t("noResultsGeneric"),
     },
     gaming: {
       icon: Gamepad2,
       title: t("gaming"),
-      empty: isAr ? "لا توجد نتائج." : "No results.",
+      empty: t("noResultsGeneric"),
     },
     news: {
       icon: Newspaper,
       title: t("news"),
-      empty: isAr ? "لا توجد نتائج." : "No results.",
+      empty: t("noResultsGeneric"),
     },
     sports: {
       icon: Trophy,
       title: t("sports"),
-      empty: isAr ? "لا توجد نتائج." : "No results.",
+      empty: t("noResultsGeneric"),
     },
   };
 
   const meta = metaMap[normalized] || {
     icon: ListVideo,
     title: page,
-    empty: isAr ? "لا يوجد محتوى." : "No content.",
+    empty: t("noContent"),
   };
 
   // remote query key
@@ -301,20 +293,20 @@ export default function LibraryPage(props: Props) {
             className="flex items-center gap-2 h-9 px-4 rounded-full bg-yt-blue text-black font-bold text-sm active:scale-95 transition-transform"
           >
             <Plus className="w-4 h-4" />
-            {isAr ? "قائمة جديدة" : "New Playlist"}
+            {t("newPlaylist")}
           </button>
         </div>
 
         {showCreate && (
           <div className="mb-8 p-4 rounded-xl bg-yt-surface border border-yt-border animate-in slide-in-from-top-4">
-            <h3 className="font-bold mb-3">{isAr ? "إنشاء قائمة تشغيل جديدة" : "Create New Playlist"}</h3>
+            <h3 className="font-bold mb-3">{t("createNewPlaylist")}</h3>
             <div className="flex gap-2">
               <input
                 autoFocus
                 type="text"
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
-                placeholder={isAr ? "عنوان القائمة..." : "Playlist title..."}
+                placeholder={t("playlistTitlePlaceholder")}
                 className="flex-1 bg-yt-bg border border-yt-border rounded-lg px-3 py-2 outline-none focus:border-yt-blue transition-colors"
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               />
@@ -323,13 +315,13 @@ export default function LibraryPage(props: Props) {
                 disabled={!newTitle.trim()}
                 className="bg-white text-black px-4 py-2 rounded-lg font-bold disabled:opacity-50"
               >
-                {isAr ? "إنشاء" : "Create"}
+                {t("create")}
               </button>
               <button
                 onClick={() => setShowCreate(false)}
                 className="bg-yt-raised px-4 py-2 rounded-lg font-bold"
               >
-                {isAr ? "إلغاء" : "Cancel"}
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -371,7 +363,7 @@ export default function LibraryPage(props: Props) {
                 {pl.name}
               </h3>
               <p className="text-[13px] text-yt-sub mt-0.5">
-                {pl.type === "system" ? (isAr ? "نظام" : "System") : isAr ? "قائمة مخصصة" : "Custom Playlist"}
+                {pl.type === "system" ? t("systemPlaylist") : t("customPlaylist")}
               </p>
             </button>
           ))}
@@ -442,7 +434,7 @@ export default function LibraryPage(props: Props) {
             <meta.icon className="w-9 h-9 mb-4" />
             <h1 className="font-display font-black text-2xl leading-tight">{meta.title}</h1>
             <p className="text-sm text-white/80 mt-2">
-              {list.length} {isAr ? "فيديو محفوظ على هذا الجهاز" : "videos saved on this device"}
+              {list.length} {t("videosSavedOnDevice")}
             </p>
             <div className="flex gap-2 mt-5">
               <button
@@ -450,7 +442,7 @@ export default function LibraryPage(props: Props) {
                 disabled={!list.length}
                 className="flex-1 h-9 rounded-full bg-white text-black text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-transform"
               >
-                <PlayCircle className="w-4 h-4" /> {isAr ? "تشغيل الكل" : "Play all"}
+                <PlayCircle className="w-4 h-4" /> {t("playAll")}
               </button>
               <button
                 onClick={() =>
@@ -458,7 +450,7 @@ export default function LibraryPage(props: Props) {
                 }
                 disabled={!list.length}
                 className="w-9 h-9 rounded-full bg-white/20 grid place-items-center disabled:opacity-50"
-                aria-label="Shuffle"
+                aria-label={t("shuffle")}
               >
                 <Shuffle className="w-4 h-4" />
               </button>
@@ -522,8 +514,7 @@ export default function LibraryPage(props: Props) {
         <EmptyState message={meta.empty} />
       ) : list.length === 0 ? (
         <div className="flex items-center gap-3 text-yt-sub text-sm py-10">
-          <Loader2 className="w-5 h-5 animate-spin" />{" "}
-          {isAr ? "جارٍ تحميل بيانات السجل..." : "Loading history data..."}
+          <Loader2 className="w-5 h-5 animate-spin" /> {t("loadingHistoryData")}
         </div>
       ) : (
         <div className="max-w-4xl space-y-3">
