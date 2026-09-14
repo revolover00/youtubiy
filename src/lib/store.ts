@@ -103,6 +103,71 @@ export function setBackgroundPlay(enabled: boolean) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Playback Progress: Firestore + Local Cache                         */
+/* ------------------------------------------------------------------ */
+
+export function getLocalProgress(): Record<string, number> {
+  return read<Record<string, number>>("yt.progress", {});
+}
+
+export function setLocalProgress(progress: Record<string, number>) {
+  write("yt.progress", progress);
+}
+
+export function savePlaybackProgress(videoId: string, seconds: number) {
+  const progress = getLocalProgress();
+  const current = progress[videoId] || 0;
+  // Only save if progress has moved significantly (at least 5 seconds) or if it's the first save
+  if (Math.abs(current - seconds) < 5) return;
+
+  progress[videoId] = Math.floor(seconds);
+  setLocalProgress(progress);
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  const docPath = `users/${currentUser.uid}/history/${videoId}`;
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "history", videoId);
+    // Use updateDoc to avoid overwriting metadata if it exists, but need to handle case where doc doesn't exist
+    // Actually, addHistory is usually called first.
+    updateDoc(docRef, {
+      progress: Math.floor(seconds),
+      updatedAt: new Date().toISOString(),
+    }).catch(() => {
+      // If doc doesn't exist yet, we don't strictly need to create it here as addHistory will.
+    });
+  } catch (error) {
+    // Silent fail for progress updates to avoid console noise
+  }
+}
+
+export async function fetchUserProgress(): Promise<Record<string, number>> {
+  const local = getLocalProgress();
+  const currentUser = auth.currentUser;
+  if (!currentUser) return local;
+
+  try {
+    const snap = await getDocs(collection(db, "users", currentUser.uid, "history"));
+    const remote: Record<string, number> = {};
+    snap.forEach((d) => {
+      const data = d.data();
+      if (typeof data.progress === "number") {
+        remote[d.id] = data.progress;
+      }
+    });
+    if (Object.keys(remote).length > 0) {
+      const merged = { ...local, ...remote };
+      setLocalProgress(merged);
+      return merged;
+    }
+    return local;
+  } catch {
+    return local;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* User Profile Synchronization with Firestore                        */
 /* ------------------------------------------------------------------ */
 
@@ -308,6 +373,7 @@ export async function addHistory(row: HistoryRow): Promise<void> {
       channelTitle: row.channel_name || "",
       thumbnail: row.thumbnail || "",
       duration: row.duration || 0,
+      progress: row.progress || 0,
       watchedAt: row.watched_at || new Date().toISOString(),
     });
   } catch (error) {

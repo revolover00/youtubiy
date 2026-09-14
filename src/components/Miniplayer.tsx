@@ -25,15 +25,9 @@ export default function Miniplayer({ video, startTime, onExpand, onClose, onTime
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Video Container with hover overlay */}
+      {/* Video Container with global player slot */}
       <div className="relative aspect-video bg-black group">
-        <YouTubePlayer
-          videoId={id}
-          autoplay
-          startTime={startTime}
-          onTimeUpdate={onTimeUpdate}
-          title={video.title}
-        />
+        <div id="miniplayer-player-slot" className="w-full h-full" />
 
         {/* Top hover action buttons */}
         <div

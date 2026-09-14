@@ -74,8 +74,13 @@ export interface Subscription {
 
 export interface HistoryRow {
   video_id: string;
+  title?: string;
+  channel_name?: string;
   channel_id?: string;
+  thumbnail?: string;
+  duration?: number;
   category?: string;
+  progress?: number;
   watched_at: string;
 }
 

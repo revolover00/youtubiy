@@ -34,9 +34,19 @@ export default function YouTubePlayer({
   onTimeUpdate,
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const { backgroundPlay, preferredQuality, setPreferredQuality } = useAppStore();
+  const { lang, t } = useLanguage();
+
+  const initialStartTime = useRef<{ id: string; time: number | undefined }>({
+    id: videoId,
+    time: startTime,
+  });
+
+  if (initialStartTime.current.id !== videoId) {
+    initialStartTime.current = { id: videoId, time: startTime };
+  }
 
   useEffect(() => {
-    if (!onTimeUpdate) return;
     const handleMsg = (e: MessageEvent) => {
       try {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
@@ -46,7 +56,10 @@ export default function YouTubePlayer({
           data.info &&
           typeof data.info.currentTime === "number"
         ) {
-          onTimeUpdate(data.info.currentTime);
+          onTimeUpdate?.(data.info.currentTime);
+        }
+        if (data && data.event === "onPlaybackQualityChange" && typeof data.info === "string") {
+          setPreferredQuality(data.info);
         }
       } catch {
         // ignore non-json messages
@@ -54,7 +67,7 @@ export default function YouTubePlayer({
     };
     window.addEventListener("message", handleMsg);
     return () => window.removeEventListener("message", handleMsg);
-  }, [onTimeUpdate]);
+  }, [onTimeUpdate, setPreferredQuality]);
 
   const handleIframeLoad = () => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
@@ -66,8 +79,6 @@ export default function YouTubePlayer({
     }
   };
 
-  const { backgroundPlay } = useAppStore();
-  const { lang, t } = useLanguage();
 
   useEffect(() => {
     // Keep YouTube playing when tab is hidden or backgrounded (if enabled)
@@ -174,20 +185,25 @@ export default function YouTubePlayer({
       enablejsapi: "1",
       widgetid: "1",
     });
-    if (startTime && startTime > 0) p.set("start", String(Math.floor(startTime)));
+    if (preferredQuality && preferredQuality !== "auto") {
+      p.set("vq", preferredQuality);
+    }
+    if (initialStartTime.current.time && initialStartTime.current.time > 0) {
+      p.set("start", String(Math.floor(initialStartTime.current.time)));
+    }
     if (loop) {
       p.set("loop", "1");
       p.set("playlist", videoId);
     }
     return p;
-  }, [videoId, autoplay, muted, controls, lang, startTime, loop]);
+  }, [videoId, autoplay, muted, controls, lang, loop, preferredQuality]);
 
   return (
     <iframe
       ref={iframeRef}
       key={`${videoId}-${autoplay}-${muted}`}
       className={className}
-      src={`https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`}
+      src={`https://www.youtube.com/embed/${videoId}?${params.toString()}`}
       title={title}
       loading="lazy"
       onLoad={handleIframeLoad}

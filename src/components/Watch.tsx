@@ -16,6 +16,7 @@ import {
 import { getStreams } from "../lib/api";
 import { channelIdFromUrl, fmtDuration, fmtViews, timeAgoAr, videoIdFromUrl } from "../lib/format";
 import { addHistory, setMeta } from "../lib/store";
+import { appStore } from "../lib/appStore";
 import type { PipedVideo, StreamData } from "../lib/types";
 import { Avatar, ErrorState } from "./Feed";
 import YouTubePlayer from "./YouTubePlayer";
@@ -125,6 +126,7 @@ export default function Watch({
         channel_id: channelIdFromUrl(data.uploaderUrl),
         category: data.category,
         watched_at: new Date().toISOString(),
+        progress: appStore.getSnapshot().playbackTimes[id] || 0,
       };
       addHistory(row);
       window.dispatchEvent(new CustomEvent("yt:history", { detail: row }));
@@ -176,15 +178,9 @@ export default function Watch({
   return (
     <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col lg:flex-row gap-6">
       <div className="flex-1 min-w-0">
-        {/* native ad-free player */}
+        {/* native ad-free player slot */}
         <div className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black group">
-          <YouTubePlayer
-            videoId={id}
-            autoplay
-            title={data.title}
-            startTime={startTime}
-            onTimeUpdate={onTimeUpdate}
-          />
+          <div id="watch-player-slot" className="w-full h-full" />
           {onMinimize && (
             <button
               onClick={onMinimize}

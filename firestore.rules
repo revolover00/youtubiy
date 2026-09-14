@@ -48,6 +48,7 @@ service cloud.firestore {
         (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
         (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
         (!('duration' in data) || data.duration is number) &&
+        (!('progress' in data) || data.progress is number) &&
         data.watchedAt is string && data.watchedAt.size() <= 64;
     }
 

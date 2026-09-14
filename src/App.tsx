@@ -23,6 +23,7 @@ import PlaylistDialog from "./components/PlaylistDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import { YouTubeImportModal } from "./components/YouTubeImportModal";
 import { YouTubeSyncBanner } from "./components/YouTubeSyncBanner";
+import YouTubePlayer from "./components/YouTubePlayer";
 import {
   ChipsBar,
   VideoCard,
@@ -32,6 +33,7 @@ import {
   ErrorState,
   ChannelResultCard,
   PlaylistCard,
+  Avatar,
 } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
 import { buildHomeFeed, buildSubscriptionsFeed } from "./lib/recommend";
@@ -55,6 +57,8 @@ import {
   getBackgroundPlay,
   setBackgroundPlay,
   getCustomPlaylists,
+  fetchUserProgress,
+  savePlaybackProgress,
 } from "./lib/store";
 import { useAuth } from "./lib/AuthContext";
 import type {
@@ -170,6 +174,13 @@ export default function App() {
     fetchUserLiked()
       .then(setLikedState)
       .catch(() => setLikedState(getLiked()));
+    fetchUserProgress()
+      .then((p) => {
+        Object.entries(p).forEach(([id, time]) => {
+          appStore.setPlaybackTime(id, time);
+        });
+      })
+      .catch(() => {});
 
     appStore.setBackgroundPlay(getBackgroundPlay());
   }, [user]);
@@ -875,6 +886,56 @@ export default function App() {
     }
   }, [isSearchActive, searchFilter, searchQ, t]);
 
+  const [playerBounds, setPlayerBounds] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    visible: boolean;
+  }>({ top: 0, left: 0, width: 0, height: 0, visible: false });
+
+  // Update player bounds based on active slot
+  useEffect(() => {
+    const update = () => {
+      let targetId = "";
+      if (route.type === "watch") targetId = "watch-player-slot";
+      else if (miniplayer) targetId = "miniplayer-player-slot";
+
+      if (!targetId) {
+        setPlayerBounds((b) => ({ ...b, visible: false }));
+        return;
+      }
+
+      const el = document.getElementById(targetId);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        setPlayerBounds({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+          visible: true,
+        });
+      } else {
+        setPlayerBounds((b) => ({ ...b, visible: false }));
+      }
+    };
+
+    update();
+    const timer = setInterval(update, 100); // Check for layout shifts
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [route, miniplayer]);
+
+  const activeVideo = route.type === "watch" ? route.video : miniplayer?.video;
+  const activeVideoId = activeVideo ? videoIdFromUrl(activeVideo.url) : "";
+
   return (
     <div className="min-h-screen bg-yt-bg text-yt-text">
       <Header
@@ -927,10 +988,6 @@ export default function App() {
             onToggleSub={(m) => doToggleSub(m)}
             onMinimize={minimizeVideo}
             startTime={appStore.getPlaybackTime(videoIdFromUrl(route.video.url))}
-            onTimeUpdate={(t) => {
-              const id = videoIdFromUrl(route.video.url);
-              if (id) appStore.setPlaybackTime(id, t);
-            }}
           />
         )}
 
@@ -1262,9 +1319,43 @@ export default function App() {
           onClose={closeMiniplayer}
           onTimeUpdate={(t) => {
             const id = videoIdFromUrl(miniplayer.video.url);
-            if (id) appStore.setPlaybackTime(id, t);
+            if (id) {
+              appStore.setPlaybackTime(id, t);
+              savePlaybackProgress(id, t);
+            }
           }}
         />
+      )}
+
+      {/* Global Persistent Player */}
+      {activeVideoId && (
+        <div
+          style={{
+            position: "fixed",
+            top: playerBounds.top,
+            left: playerBounds.left,
+            width: playerBounds.width,
+            height: playerBounds.height,
+            zIndex: playerBounds.visible ? (route.type === "watch" ? 10 : 50) : -1,
+            pointerEvents: playerBounds.visible ? "auto" : "none",
+            opacity: playerBounds.visible ? 1 : 0,
+            transition: "all 0.3s cubic-bezier(0.2, 0, 0, 1)",
+            backgroundColor: "black",
+            overflow: "hidden",
+          }}
+          className={route.type === "watch" ? "lg:rounded-xl" : ""}
+        >
+          <YouTubePlayer
+            videoId={activeVideoId}
+            autoplay
+            title={activeVideo?.title}
+            startTime={appStore.getPlaybackTime(activeVideoId)}
+            onTimeUpdate={(t) => {
+              appStore.setPlaybackTime(activeVideoId, t);
+              savePlaybackProgress(activeVideoId, t);
+            }}
+          />
+        </div>
       )}
 
       {/* Floating Notification Toast */}

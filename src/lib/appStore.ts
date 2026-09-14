@@ -43,15 +43,28 @@ interface AppStoreState {
   searchFilter: SearchFilter;
   miniplayer: MiniplayerState | null;
   playbackTimes: Record<string, number>;
+  preferredQuality: string;
   backgroundPlay: boolean;
   route: RouteState;
+}
+
+let initialPlaybackTimes = {};
+let initialQuality = "auto";
+try {
+  const savedProgress = localStorage.getItem("yt.progress");
+  if (savedProgress) initialPlaybackTimes = JSON.parse(savedProgress);
+  const savedQuality = localStorage.getItem("yt.quality");
+  if (savedQuality) initialQuality = savedQuality;
+} catch (e) {
+  // Silent fail
 }
 
 let state: AppStoreState = {
   searchQ: "",
   searchFilter: "All",
   miniplayer: null,
-  playbackTimes: {},
+  playbackTimes: initialPlaybackTimes,
+  preferredQuality: initialQuality,
   backgroundPlay: true,
   route: { type: "home" },
 };
@@ -101,6 +114,17 @@ export const appStore = {
     notify();
   },
 
+  setPreferredQuality(q: string) {
+    if (state.preferredQuality === q) return;
+    state = { ...state, preferredQuality: q };
+    try {
+      localStorage.setItem("yt.quality", q);
+    } catch (e) {
+      // ignore
+    }
+    notify();
+  },
+
   setRoute(r: RouteState | ((prev: RouteState) => RouteState)) {
     const next = typeof r === "function" ? r(state.route) : r;
     if (JSON.stringify(state.route) === JSON.stringify(next)) return;
@@ -110,10 +134,16 @@ export const appStore = {
 
   setPlaybackTime(id: string, time: number) {
     if (!id) return;
+    const nextTimes = { ...state.playbackTimes, [id]: Math.floor(time) };
     state = {
       ...state,
-      playbackTimes: { ...state.playbackTimes, [id]: Math.floor(time) },
+      playbackTimes: nextTimes,
     };
+    try {
+      localStorage.setItem("yt.progress", JSON.stringify(nextTimes));
+    } catch (e) {
+      // Silent fail
+    }
   },
 
   getPlaybackTime(id: string): number {
