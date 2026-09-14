@@ -65,3 +65,10 @@ export const channelFn = createServerFn({ method: "POST" })
     const { channel } = await import("./youtube.server");
     return channel(data.id);
   });
+
+export const browsePageFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => z.object({ continuation: z.string().min(1) }).parse(data))
+  .handler(async ({ data }): Promise<Page> => {
+    const { browsePage } = await import("./youtube.server");
+    return browsePage(data.continuation);
+  });

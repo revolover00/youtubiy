@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from "react";
-import { BadgeCheck, Bell, Search, Share2 } from "lucide-react";
-import { getChannel } from "../lib/api";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { BadgeCheck, Bell, Loader2, Search, Share2 } from "lucide-react";
+import { getChannel, browsePaged } from "../lib/api";
 import { fmtViews, videoIdFromUrl } from "../lib/format";
 import type { ChannelData, PipedVideo } from "../lib/types";
 import { Avatar, ErrorState, SkeletonGrid, VideoCard } from "./Feed";
@@ -55,21 +55,89 @@ export default function ChannelPage({
     const current = TABS.find((t) => t.id === tabId);
     if (!current) setTabId("home");
   }, [TABS, tabId]);
+
   const [data, setData] = useState<ChannelData | null>(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+
+  // Pagination state
+  const [allVideos, setAllVideos] = useState<PipedVideo[]>([]);
+  const [nextVideos, setNextVideos] = useState<string | null>(null);
+  const [allShorts, setAllShorts] = useState<PipedVideo[]>([]);
+  const [nextShorts, setNextShorts] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
     setData(null);
     setError(false);
+    setAllVideos([]);
+    setNextVideos(null);
+    setAllShorts([]);
+    setNextShorts(null);
+
     getChannel(channelId)
-      .then((d) => alive && setData(d))
+      .then((d) => {
+        if (alive) {
+          setData(d);
+          setAllVideos(d.relatedStreams || []);
+          setNextVideos(d.nextVideos || null);
+          setAllShorts(d.shorts || []);
+          setNextShorts(d.nextShorts || null);
+        }
+      })
       .catch(() => alive && setError(true));
     return () => {
       alive = false;
     };
   }, [channelId, attempt]);
+
+  const loadMore = useCallback(async () => {
+    const token = tabId === "shorts" ? nextShorts : nextVideos;
+    if (loadingMore || !token) return;
+
+    setLoadingMore(true);
+    try {
+      const r = await browsePaged(token);
+      if (tabId === "shorts") {
+        setAllShorts((prev) => {
+          const have = new Set(prev.map((v) => v.url));
+          return [...prev, ...r.items.filter((v) => !have.has(v.url))];
+        });
+        setNextShorts(r.next as string | null);
+      } else {
+        setAllVideos((prev) => {
+          const have = new Set(prev.map((v) => v.url));
+          return [...prev, ...r.items.filter((v) => !have.has(v.url))];
+        });
+        setNextVideos(r.next as string | null);
+      }
+    } catch (e) {
+      console.error("Failed to load more channel content", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [tabId, nextVideos, nextShorts, loadingMore]);
+
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    const hasMore = tabId === "shorts" ? !!nextShorts : !!nextVideos;
+    const isPaginatable = tabId === "videos" || tabId === "shorts" || tabId === "home";
+    
+    if (!el || !hasMore || !isPaginatable) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          void loadMore();
+        }
+      },
+      { rootMargin: "800px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [tabId, nextVideos, nextShorts, loadMore]);
 
   if (error)
     return (
@@ -83,11 +151,11 @@ export default function ChannelPage({
       </div>
     );
 
-  const videos = (data.relatedStreams || []).filter((v) => v.url?.includes("/watch"));
-  const shorts =
-    data.shorts && data.shorts.length > 0
-      ? data.shorts
+  const videos = allVideos.filter((v) => v.url?.includes("/watch"));
+  const shorts = allShorts.length > 0
+      ? allShorts
       : videos.filter((v) => v.duration > 0 && v.duration <= 60);
+  
   const featured = videos[0];
   const cardProps = (v: PipedVideo, i: number) => ({
     video: v,
@@ -251,7 +319,7 @@ export default function ChannelPage({
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
-              {videos.slice(0, 8).map((v, i) => (
+              {videos.map((v, i) => (
                 <VideoCard key={videoIdFromUrl(v.url)} {...cardProps(v, i)} />
               ))}
             </div>
@@ -329,6 +397,20 @@ export default function ChannelPage({
             </ul>
           </div>
         )}
+
+        {/* infinite-scroll sentinel */}
+        <div ref={loadMoreRef} className="h-24 flex items-center justify-center text-yt-sub">
+          {loadingMore ? (
+            <Loader2 className="w-7 h-7 animate-spin" />
+          ) : (tabId === "shorts" ? !!nextShorts : !!nextVideos) ? (
+            <button
+              onClick={() => void loadMore()}
+              className="h-9 px-5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium transition-colors"
+            >
+              {isAr ? "تحميل المزيد" : "Load more"}
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

@@ -61,6 +61,8 @@ export interface ChannelData {
   verified?: boolean;
   relatedStreams: PipedVideo[];
   shorts?: PipedVideo[];
+  nextVideos?: string | null;
+  nextShorts?: string | null;
 }
 
 export interface Subscription {

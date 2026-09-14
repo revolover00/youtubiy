@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../lib/appStore";
+import { useLanguage } from "../lib/i18n";
 
 interface Props {
   videoId: string;
@@ -66,7 +67,7 @@ export default function YouTubePlayer({
   };
 
   const { backgroundPlay } = useAppStore();
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
 
   useEffect(() => {
     // Keep YouTube playing when tab is hidden or backgrounded (if enabled)
@@ -120,7 +121,7 @@ export default function YouTubePlayer({
       ],
     });
 
-    const sendCommand = (func: string, args: any[] = []) => {
+    const sendCommand = (func: string, args: unknown[] = []) => {
       if (iframeRef.current?.contentWindow) {
         iframeRef.current.contentWindow.postMessage(
           JSON.stringify({ event: "command", func, args }),
@@ -155,7 +156,7 @@ export default function YouTubePlayer({
       navigator.mediaSession.setActionHandler("pause", null);
       navigator.mediaSession.setActionHandler("seekto", null);
     };
-  }, [videoId, title, autoplay]);
+  }, [videoId, title, autoplay, t]);
 
   const params = useMemo(() => {
     const p = new URLSearchParams({

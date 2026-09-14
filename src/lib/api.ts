@@ -16,6 +16,7 @@ import {
   trendingFn,
   trendingPageFn,
   videoDetailsFn,
+  browsePageFn,
 } from "./youtube.functions";
 import type {
   ChannelData,
@@ -120,6 +121,12 @@ export function getChannel(channelId: string): Promise<ChannelData> {
     p.catch(() => channelCache.delete(channelId));
   }
   return p;
+}
+
+/** Fetch a generic browse continuation page (channel tabs, etc). */
+export async function browsePaged(continuation: string): Promise<FeedPage> {
+  const r = await run(`المزيد من المحتوى`, () => browsePageFn({ data: { continuation } }));
+  return { items: r.items, next: r.continuation };
 }
 
 const trendingCache = { value: null as Promise<PipedVideo[]> | null };

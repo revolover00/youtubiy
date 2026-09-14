@@ -667,5 +667,18 @@ export async function channel(input: string): Promise<ChannelData> {
     verified: JSON.stringify(header.badges ?? []).includes("VERIFIED"),
     relatedStreams: videos,
     shorts,
+    nextVideos: continuationToken(data),
+    nextShorts: continuationToken(shortsData),
+  };
+}
+
+/** Fetch a generic continuation page (works for channel tabs, playlists, etc). */
+export async function browsePage(continuation: string): Promise<Page> {
+  const data = await innertube("browse", { continuation });
+  return {
+    items: extractVideos(data),
+    continuation: continuationToken(data),
+    channels: [],
+    playlists: [],
   };
 }
