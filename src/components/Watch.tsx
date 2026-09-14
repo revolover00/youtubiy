@@ -10,6 +10,9 @@ import {
   Loader2,
   PictureInPicture2,
   X,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { getCommentsPage, getStreams, searchPaged } from "../lib/api";
 import {
@@ -65,11 +68,14 @@ export default function Watch({
   const [expanded, setExpanded] = useState(false);
   const [disliked, setDisliked] = useState(false);
   const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
+  const [showInlineComments, setShowInlineComments] = useState(false);
 
   // Comments state & pagination
   const [commentsList, setCommentsList] = useState<PipedComment[]>([]);
   const [commentsCont, setCommentsCont] = useState<string | undefined>(undefined);
   const [loadingComments, setLoadingComments] = useState(false);
+  const loadMoreCommentsRef = useRef<HTMLDivElement>(null);
+  const mobileCommentsScrollRef = useRef<HTMLDivElement>(null);
 
   // Infinite Suggested Videos state
   const [relatedStreams, setRelatedStreams] = useState<PipedVideo[]>([]);
@@ -78,19 +84,7 @@ export default function Watch({
   const [relatedQueryIndex, setRelatedQueryIndex] = useState(0);
   const loadMoreRelatedRef = useRef<HTMLDivElement>(null);
 
-  // Mobile swipe down gesture tracking
   const playerContainerRef = useRef<HTMLDivElement>(null);
-  const touchStateRef = useRef<{
-    startY: number;
-    startX: number;
-    active: boolean;
-    moved: boolean;
-  }>({
-    startY: 0,
-    startX: 0,
-    active: false,
-    moved: false,
-  });
 
   const labels = useMemo(
     () => ({
@@ -242,50 +236,23 @@ export default function Watch({
     }
   }, [loadingComments, commentsCont]);
 
-  // Touch Swipe Down to Minimize Handlers
-  const handleTouchStart = (e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    touchStateRef.current = {
-      startY: touch.clientY,
-      startX: touch.clientX,
-      active: true,
-      moved: false,
-    };
-  };
+  // Desktop IntersectionObserver for auto loading comments as user scrolls down comments
+  useEffect(() => {
+    const el = loadMoreCommentsRef.current;
+    if (!el || !commentsCont) return;
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!touchStateRef.current.active) return;
-    const dy = e.touches[0].clientY - touchStateRef.current.startY;
-    const dx = e.touches[0].clientX - touchStateRef.current.startX;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingComments) {
+          void loadMoreComments();
+        }
+      },
+      { rootMargin: "300px 0px" },
+    );
 
-    if (dy > 0 && dy > Math.abs(dx)) {
-      touchStateRef.current.moved = true;
-      const clampedY = Math.min(dy, 120);
-      setDragY(clampedY);
-      const persistentEl = document.getElementById("persistent-player");
-      if (persistentEl) {
-        persistentEl.style.transform = `translate3d(0, ${clampedY}px, 0) scale(${
-          1 - clampedY * 0.0015
-        })`;
-      }
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStateRef.current.active) return;
-    const dy = e.changedTouches[0].clientY - touchStateRef.current.startY;
-    touchStateRef.current.active = false;
-    setDragY(0);
-
-    const persistentEl = document.getElementById("persistent-player");
-    if (persistentEl) {
-      persistentEl.style.transform = "";
-    }
-
-    if (dy > 50 && onMinimize) {
-      onMinimize();
-    }
-  };
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMoreComments, loadingComments, commentsCont]);
 
   useEffect(() => {
     if (data) {
@@ -295,7 +262,8 @@ export default function Watch({
         category: data.category,
         title: data.title,
         duration: video.duration,
-        uploader: data.uploader,
+        channel_name: data.uploader,
+        watched_at: new Date().toISOString(),
       };
       addHistory(row);
       window.dispatchEvent(new CustomEvent("yt:history", { detail: row }));
@@ -360,7 +328,6 @@ export default function Watch({
         <div className="flex-1 min-w-0">
           <div className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black group">
             <div id="watch-player-slot" className="w-full h-full" />
-            
           </div>
           <div className="h-6 w-2/3 bg-yt-surface rounded mt-4 animate-pulse" />
           <div className="h-4 w-1/3 bg-yt-surface rounded mt-3 animate-pulse" />
@@ -381,29 +348,12 @@ export default function Watch({
   return (
     <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col lg:flex-row gap-6">
       <div className="flex-1 min-w-0">
-        {/* Native ad-free player slot with swipe down to minimize support */}
+        {/* Native player slot */}
         <div
           ref={playerContainerRef}
-
-          style={
-            dragY > 0
-              ? {
-                  transform: `translate3d(0, ${dragY}px, 0) scale(${1 - dragY * 0.0015})`,
-                  transition: "none",
-                }
-              : { transition: "transform 0.2s ease-out" }
-          }
-          className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black group shadow-lg"
+          className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black shadow-lg"
         >
           <div id="watch-player-slot" className="w-full h-full" />
-
-          {/* Top swipe-down grab indicator & minimize button for touch devices */}
-          {onMinimize && (
-            <div className="absolute top-0 inset-x-0 h-12 z-10 flex items-center justify-between px-3 bg-gradient-to-b from-black/70 via-black/20 to-transparent pointer-events-auto">
-              <div className="w-10 h-1 rounded-full bg-white/60 shadow-sm" />
-              <div className="w-9 h-9" />
-            </div>
-          )}
         </div>
 
         {/* Video Title & Actions */}
@@ -496,6 +446,176 @@ export default function Watch({
               <span className="hidden sm:inline">{t("save")}</span>
             </button>
             {onMinimize && (
+              <button
+                onClick={onMinimize}
+                className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium"
+                title={isAr ? "تصغير الفيديو (i)" : "Miniplayer (i)"}
+              >
+                <PictureInPicture2 className="w-5 h-5" />
+                <span className="hidden sm:inline">{isAr ? "تصغير" : "Miniplayer"}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Video Description & Metadata Box */}
+        <div
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-4 p-3.5 sm:p-4 rounded-xl bg-yt-surface/80 hover:bg-yt-surface transition-colors cursor-pointer text-sm select-text"
+        >
+          <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-yt-text flex-wrap">
+            <span>
+              {data.views ? fmtViews(data.views, lang) : "0"} {t("views")}
+            </span>
+            <span>•</span>
+            <span>{displayRelativeDate || cleanUploadDate}</span>
+            {data.category && (
+              <>
+                <span>•</span>
+                <span className="text-yt-sub font-medium">#{data.category}</span>
+              </>
+            )}
+          </div>
+
+          {data.description ? (
+            <div className="mt-2 text-yt-text leading-relaxed">
+              <p
+                className={`whitespace-pre-line ${expanded ? "" : "line-clamp-2 sm:line-clamp-3"}`}
+              >
+                {data.description}
+              </p>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded((x) => !x);
+                }}
+                className="mt-1 font-bold text-xs sm:text-sm text-yt-sub hover:text-yt-text block cursor-pointer"
+              >
+                {expanded ? (isAr ? "إظهار أقل" : "Show less") : isAr ? "...المزيد" : "...more"}
+              </button>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs sm:text-sm text-yt-sub italic">{t("noDescription")}</p>
+          )}
+        </div>
+
+        {/* Mobile & Tablet Comments Teaser Card (Visible on Phone and Tablet screens < lg) */}
+        <div className="lg:hidden mt-3">
+          <div
+            onClick={() => setMobileCommentsOpen(true)}
+            className="p-3 sm:p-4 rounded-xl bg-yt-surface/90 hover:bg-yt-surface border border-yt-border/40 transition-all cursor-pointer active:scale-[0.99] select-none shadow-xs"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-yt-sub" />
+                <span className="font-bold text-sm text-yt-text">{t("comments")}</span>
+                <span className="text-xs text-yt-sub font-semibold tabular-nums px-2 py-0.5 rounded-full bg-yt-raised">
+                  {formattedCommentsCount}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-yt-sub font-medium">
+                <span className="hover:text-yt-text">
+                  {isAr ? "فتح لوحة التعليقات" : "Open sheet"}
+                </span>
+                <ChevronDown className="w-4 h-4" />
+              </div>
+            </div>
+
+            {/* Top comment preview */}
+            {commentsList.length > 0 ? (
+              <div className="flex items-start gap-2.5 mt-2.5 pt-2 border-t border-yt-border/30">
+                <Avatar
+                  src={commentsList[0].thumbnail}
+                  name={commentsList[0].author}
+                  size="w-6 h-6 text-[10px] shrink-0 mt-0.5"
+                />
+                <div className="flex-1 min-w-0 text-xs sm:text-[13px] leading-snug">
+                  <span className="font-bold text-yt-text me-1.5">@{commentsList[0].author}</span>
+                  <span className="text-yt-sub line-clamp-1">{commentsList[0].commentText}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-yt-sub mt-2 pt-2 border-t border-yt-border/30">
+                {isAr
+                  ? "انقر لإضافة تعليق أو قراءة التعليقات..."
+                  : "Tap to add or read comments..."}
+              </p>
+            )}
+          </div>
+
+          {/* Quick toggle to also show inline on tablets / mobile */}
+          <div className="flex justify-end mt-1.5 px-1">
+            <button
+              onClick={() => setShowInlineComments((s) => !s)}
+              className="text-xs text-yt-sub hover:text-yt-text font-medium flex items-center gap-1 cursor-pointer"
+            >
+              {showInlineComments ? (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  <span>{isAr ? "إخفاء التعليقات في الصفحة" : "Hide inline comments"}</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  <span>
+                    {isAr
+                      ? "أو تصفح جميع التعليقات هنا في الصفحة مباشرةً"
+                      : "Or view all comments inline on page"}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Inline comments for mobile/tablet when toggled */}
+          {showInlineComments && (
+            <div className="mt-3 p-3.5 sm:p-4 rounded-xl bg-yt-raised border border-yt-border/40 space-y-4 animate-in fade-in duration-200">
+              <div className="flex gap-2.5 items-center">
+                <span className="w-8 h-8 rounded-full grid place-items-center text-xs font-bold bg-gradient-to-br from-yt-blue to-teal-400 text-black shrink-0">
+                  {isAr ? "أ" : "U"}
+                </span>
+                <input
+                  placeholder={t("writeComment")}
+                  className="flex-1 bg-yt-surface rounded-full px-3.5 py-1.5 text-sm placeholder:text-yt-sub outline-none border border-transparent focus:border-yt-border transition-colors"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.target as HTMLInputElement).value.trim()) {
+                      notify(t("commentPostedToast"));
+                      (e.target as HTMLInputElement).value = "";
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="space-y-4 mt-3">
+                {!commentsList.length && (
+                  <p className="text-sm text-yt-sub py-4 text-center">{t("noComments")}</p>
+                )}
+                {commentsList.map((c, i) => (
+                  <CommentRow key={i} c={c} />
+                ))}
+
+                {commentsCont && (
+                  <div className="pt-2 text-center">
+                    <button
+                      onClick={loadMoreComments}
+                      disabled={loadingComments}
+                      className="px-6 py-2 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium transition-all active:scale-95 inline-flex items-center gap-2"
+                    >
+                      {loadingComments ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>{isAr ? "جارٍ تحميل التعليقات..." : "Loading comments..."}</span>
+                        </>
+                      ) : (
+                        <span>{isAr ? "عرض المزيد من التعليقات" : "Load more comments"}</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Desktop Comments (Shows all comments with real count and pagination) */}
@@ -532,7 +652,7 @@ export default function Watch({
 
             {/* Load more comments trigger */}
             {commentsCont && (
-              <div className="pt-4 text-center">
+              <div ref={loadMoreCommentsRef} className="pt-4 text-center">
                 <button
                   onClick={loadMoreComments}
                   disabled={loadingComments}

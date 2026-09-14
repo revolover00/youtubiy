@@ -602,39 +602,79 @@ function extractCommentsTotalCount(data: Json): number {
   return 0;
 }
 
+function isNextCommentsToken(rawToken: unknown): boolean {
+  if (!rawToken || typeof rawToken !== "string" || rawToken.length < 10) return false;
+  try {
+    const decoded = decodeURIComponent(rawToken);
+    // Exclude reply threads continuation
+    if (decoded.includes("comment-replies") || decoded.includes("replies-item")) return false;
+    const bufStr = Buffer.from(decoded, "base64").toString("latin1");
+    if (bufStr.includes("comment-replies") || bufStr.includes("replies_stream")) return false;
+    // Positive matches for root comments feed
+    if (
+      bufStr.includes("get_ranked_streams") ||
+      bufStr.includes("comments-section") ||
+      bufStr.includes("engagement-panel-comments-section") ||
+      bufStr.includes("comments")
+    ) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 function findNextCommentsToken(data: Json): string | undefined {
   const items = collect(data, "continuationItemRenderer");
-  for (const item of items) {
-    const token = item?.continuationEndpoint?.continuationCommand?.token;
-    if (token && (token.includes("comments-section") || !token.includes("replies"))) {
-      return token;
-    }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    const token =
+      item?.continuationEndpoint?.continuationCommand?.token || item?.continuationCommand?.token;
+    if (isNextCommentsToken(token)) return token;
+  }
+  const commands = collect(data, "continuationCommand");
+  for (let i = commands.length - 1; i >= 0; i--) {
+    const token = commands[i]?.token;
+    if (isNextCommentsToken(token)) return token;
   }
   return undefined;
 }
 
 export async function fetchComments(
   token: string,
-  fetchMultiplePages = true,
+  targetCount = 40,
 ): Promise<{ items: PipedComment[]; totalCount: number; nextContinuation?: string }> {
   try {
-    const p1 = await innertube("next", { continuation: token });
-    const totalCount = extractCommentsTotalCount(p1);
-    const items = parseCommentEntities(p1);
-    let nextCont = findNextCommentsToken(p1);
+    const items: PipedComment[] = [];
+    let curToken: string | undefined = token;
+    let totalCount = 0;
+    let iterations = 0;
 
-    if (fetchMultiplePages && nextCont && items.length > 0) {
-      try {
-        const p2 = await innertube("next", { continuation: nextCont });
-        const p2Items = parseCommentEntities(p2);
-        items.push(...p2Items);
-        nextCont = findNextCommentsToken(p2) || nextCont;
-      } catch {
-        // ignore secondary page fetch error
+    while (curToken && items.length < targetCount && iterations < 4) {
+      iterations++;
+      const p = await innertube("next", { continuation: curToken });
+      if (!totalCount) {
+        totalCount = extractCommentsTotalCount(p);
       }
+      const pageItems = parseCommentEntities(p);
+      if (!pageItems.length) {
+        // If no comments returned, check if there is another continuation or stop
+        const next = findNextCommentsToken(p);
+        if (!next || next === curToken) break;
+        curToken = next;
+        continue;
+      }
+      items.push(...pageItems);
+      const nextToken = findNextCommentsToken(p);
+      if (!nextToken || nextToken === curToken) {
+        curToken = undefined;
+        break;
+      }
+      curToken = nextToken;
     }
 
-    return { items, totalCount, nextContinuation: nextCont };
+    return { items, totalCount, nextContinuation: curToken };
   } catch {
     return { items: [], totalCount: 0 };
   }
@@ -791,7 +831,7 @@ export async function videoDetails(videoId: string): Promise<StreamData> {
     }) || allTokens[0];
 
   const commentsData = commentToken
-    ? await fetchComments(commentToken, true)
+    ? await fetchComments(commentToken, 30)
     : { items: [], totalCount: 0 };
 
   return {
@@ -819,7 +859,7 @@ export async function videoDetails(videoId: string): Promise<StreamData> {
 export async function getCommentsPage(
   token: string,
 ): Promise<{ items: PipedComment[]; nextContinuation?: string }> {
-  const res = await fetchComments(token, false);
+  const res = await fetchComments(token, 40);
   return { items: res.items, nextContinuation: res.nextContinuation };
 }
 
@@ -841,17 +881,26 @@ export async function channel(input: string): Promise<ChannelData> {
     if (!browseId) throw new Error("channel not found");
   }
 
-  const [vidsResult, shortsResult] = await Promise.allSettled([
+  const [homeResult, vidsResult, shortsResult] = await Promise.allSettled([
+    innertube("browse", { browseId }),
     innertube("browse", { browseId, params: "EgZ2aWRlb3PyBgQKAjoA" }),
     innertube("browse", { browseId, params: "EgZzaG9ydHPyBgUKA5oBAA%3D%3D" }),
   ]);
 
+  const homeData = homeResult.status === "fulfilled" ? homeResult.value : {};
   const data = vidsResult.status === "fulfilled" ? vidsResult.value : {};
   const shortsData = shortsResult.status === "fulfilled" ? shortsResult.value : {};
 
   const header =
-    collect(data, "c4TabbedHeaderRenderer")[0] ?? collect(data, "pageHeaderViewModel")[0] ?? {};
-  const meta = collect(data, "microformatDataRenderer")[0] ?? {};
+    collect(homeData, "c4TabbedHeaderRenderer")[0] ??
+    collect(homeData, "pageHeaderViewModel")[0] ??
+    collect(data, "c4TabbedHeaderRenderer")[0] ??
+    collect(data, "pageHeaderViewModel")[0] ??
+    {};
+  const meta =
+    collect(homeData, "microformatDataRenderer")[0] ??
+    collect(data, "microformatDataRenderer")[0] ??
+    {};
 
   const name =
     text(header.title) ||
@@ -893,7 +942,11 @@ export async function channel(input: string): Promise<ChannelData> {
   const videoCount = parseCount(videoCountText);
 
   // Extract channel videos and make sure uploader metadata is set
-  const videos = extractVideos(data).map((v) => ({
+  const rawVideos = extractVideos(data);
+  const homeVideos = extractVideos(homeData).filter((v) => !v.isShort);
+  const combinedVideos = rawVideos.length > 0 ? rawVideos : homeVideos;
+
+  const videos = combinedVideos.map((v) => ({
     ...v,
     uploaderName: v.uploaderName || name,
     uploaderAvatar: v.uploaderAvatar || avatar,
@@ -921,7 +974,7 @@ export async function channel(input: string): Promise<ChannelData> {
     verified: JSON.stringify(header.badges ?? []).includes("VERIFIED"),
     relatedStreams: videos,
     shorts,
-    nextVideos: continuationToken(data),
+    nextVideos: continuationToken(rawVideos.length > 0 ? data : homeData),
     nextShorts: continuationToken(shortsData),
   };
 }

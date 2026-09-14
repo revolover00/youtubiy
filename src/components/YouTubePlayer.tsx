@@ -4,7 +4,6 @@ import { useLanguage } from "../lib/i18n";
 
 interface Props {
   videoId: string;
-  /** Start playing as soon as the frame mounts (shorts / active card). */
   autoplay?: boolean;
   muted?: boolean;
   loop?: boolean;
@@ -16,11 +15,9 @@ interface Props {
 }
 
 /**
- * Playback uses YouTube's official embedded player.
- *
- * Direct stream URLs from third-party mirrors expire, are region-locked and
- * break constantly; the embed is signed by YouTube itself, supports adaptive
- * quality, subtitles, fullscreen and mobile autoplay, and never 403s.
+ * Clean, Genuine YouTube Player
+ * Directly uses YouTube's official player engine and UI controls
+ * Ensures 100% authenticity, zero duplicate layers, and zero sync bugs.
  */
 export default function YouTubePlayer({
   videoId,
@@ -34,7 +31,7 @@ export default function YouTubePlayer({
   onTimeUpdate,
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const { backgroundPlay, preferredQuality, setPreferredQuality } = useAppStore();
+  const { backgroundPlay, preferredQuality } = useAppStore();
   const { lang, t } = useLanguage();
 
   const initialStartTime = useRef<{ id: string; time: number | undefined }>({
@@ -46,32 +43,31 @@ export default function YouTubePlayer({
     initialStartTime.current = { id: videoId, time: startTime };
   }
 
+  // Handle postMessage to receive playback progress from YouTube JS API
   useEffect(() => {
     const handleMsg = (e: MessageEvent) => {
       try {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-        if (
-          data &&
-          data.event === "infoDelivery" &&
-          data.info &&
-          typeof data.info.currentTime === "number"
-        ) {
-          onTimeUpdate?.(data.info.currentTime);
-        }
-        if (data && data.event === "onPlaybackQualityChange" && typeof data.info === "string") {
-          setPreferredQuality(data.info);
+        if (!data) return;
+
+        if (data.event === "infoDelivery" && data.info) {
+          const info = data.info;
+          if (typeof info.currentTime === "number") {
+            onTimeUpdate?.(info.currentTime);
+          }
         }
       } catch {
-        // ignore non-json messages
+        // Ignore non-json messages
       }
     };
+
     window.addEventListener("message", handleMsg);
     return () => window.removeEventListener("message", handleMsg);
-  }, [onTimeUpdate, setPreferredQuality]);
+  }, [onTimeUpdate]);
 
+  // Activate YouTube JS API listening on load
   const handleIframeLoad = () => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      // Send the listening event to the iframe to enable infoDelivery messages
+    if (iframeRef.current?.contentWindow) {
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: "listening", id: 1, channel: "widget" }),
         "*",
@@ -79,13 +75,11 @@ export default function YouTubePlayer({
     }
   };
 
+  // Background play support: keep audio running if enabled
   useEffect(() => {
-    // Keep YouTube playing when tab is hidden or backgrounded (if enabled)
     const handleVisibility = () => {
       if (!backgroundPlay) return;
-      // We check if the current document is hidden
       if (document.visibilityState === "hidden" && iframeRef.current?.contentWindow) {
-        // Send a play command to override YouTube's auto-pause on blur
         const play = () => {
           if (!iframeRef.current?.contentWindow) return;
           iframeRef.current.contentWindow.postMessage(
@@ -93,15 +87,12 @@ export default function YouTubePlayer({
             "*",
           );
         };
-        // Sequence of play commands to fight YouTube's internal blur pause logic
         play();
-        const t1 = setTimeout(play, 150);
-        const t2 = setTimeout(play, 400);
-        const t3 = setTimeout(play, 1000);
+        const t1 = setTimeout(play, 200);
+        const t2 = setTimeout(play, 600);
         return () => {
           clearTimeout(t1);
           clearTimeout(t2);
-          clearTimeout(t3);
         };
       }
     };
@@ -110,7 +101,7 @@ export default function YouTubePlayer({
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [backgroundPlay]);
 
-  // Media Session API for background play controls
+  // Media Session API for lock screen and system media keys
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
 
@@ -131,34 +122,28 @@ export default function YouTubePlayer({
       ],
     });
 
-    const sendCommand = (func: string, args: unknown[] = []) => {
-      if (iframeRef.current?.contentWindow) {
-        iframeRef.current.contentWindow.postMessage(
-          JSON.stringify({ event: "command", func, args }),
-          "*",
-        );
-      }
-    };
-
     navigator.mediaSession.setActionHandler("play", () => {
-      sendCommand("playVideo");
-      navigator.mediaSession.playbackState = "playing";
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+        "*",
+      );
     });
 
     navigator.mediaSession.setActionHandler("pause", () => {
-      sendCommand("pauseVideo");
-      navigator.mediaSession.playbackState = "paused";
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
+        "*",
+      );
     });
 
     navigator.mediaSession.setActionHandler("seekto", (details) => {
       if (details.seekTime != null) {
-        sendCommand("seekTo", [details.seekTime, true]);
+        iframeRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event: "command", func: "seekTo", args: [details.seekTime, true] }),
+          "*",
+        );
       }
     });
-
-    if (autoplay) {
-      navigator.mediaSession.playbackState = "playing";
-    }
 
     return () => {
       navigator.mediaSession.metadata = null;
@@ -166,8 +151,9 @@ export default function YouTubePlayer({
       navigator.mediaSession.setActionHandler("pause", null);
       navigator.mediaSession.setActionHandler("seekto", null);
     };
-  }, [videoId, title, autoplay, t]);
+  }, [videoId, title, t]);
 
+  // YouTube IFrame URL parameters
   const params = useMemo(() => {
     const p = new URLSearchParams({
       autoplay: autoplay ? "1" : "0",
@@ -198,17 +184,19 @@ export default function YouTubePlayer({
   }, [videoId, autoplay, muted, controls, lang, loop, preferredQuality]);
 
   return (
-    <iframe
-      ref={iframeRef}
-      key={`${videoId}-${autoplay}-${muted}`}
-      className={className}
-      src={`https://www.youtube.com/embed/${videoId}?${params.toString()}`}
-      title={title}
-      loading="lazy"
-      onLoad={handleIframeLoad}
-      referrerPolicy="strict-origin-when-cross-origin"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-      allowFullScreen
-    />
+    <div className={`relative bg-black overflow-hidden select-none ${className}`}>
+      <iframe
+        ref={iframeRef}
+        key={`${videoId}-${autoplay}-${muted}`}
+        className="w-full h-full border-0 pointer-events-auto"
+        src={`https://www.youtube.com/embed/${videoId}?${params.toString()}`}
+        title={title}
+        loading="lazy"
+        onLoad={handleIframeLoad}
+        referrerPolicy="strict-origin-when-cross-origin"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+        allowFullScreen
+      />
+    </div>
   );
 }

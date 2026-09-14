@@ -923,8 +923,6 @@ export default function App() {
     visible: boolean;
   }>({ top: 0, left: 0, width: 0, height: 0, position: "fixed", visible: false });
 
-  const playerSwipeRef = useRef<{ startY: number; startX: number } | null>(null);
-
   const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
   // Update player bounds based on active slot
@@ -992,6 +990,7 @@ export default function App() {
     }
 
     window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, { passive: true });
     window.addEventListener("yt:player-slot-move", update);
 
     return () => {
@@ -1000,6 +999,7 @@ export default function App() {
       clearTimeout(t2);
       if (ro) ro.disconnect();
       window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update);
       window.removeEventListener("yt:player-slot-move", update);
     };
   }, [route, miniplayer]);
@@ -1410,12 +1410,8 @@ export default function App() {
             left: playerBounds.left,
             width: playerBounds.width,
             height: playerBounds.height,
-            zIndex: playerBounds.visible ? (route.type === "watch" ? 10 : 50) : -1,
-            pointerEvents: playerBounds.visible
-              ? route.type === "watch"
-                ? "auto"
-                : "none"
-              : "none",
+            zIndex: playerBounds.visible ? (route.type === "watch" ? 20 : 50) : -1,
+            pointerEvents: playerBounds.visible ? "auto" : "none",
             opacity: playerBounds.visible ? 1 : 0,
             transition: mainDragY > 0 ? "none" : "opacity 0.2s ease-out, transform 0.2s ease-out",
             transform:
@@ -1427,48 +1423,6 @@ export default function App() {
           }}
           className={route.type === "watch" ? "lg:rounded-xl" : "rounded-t-xl overflow-hidden"}
         >
-          {route.type === "watch" && (
-            <div
-              className="absolute inset-0 z-30 pointer-events-auto touch-none"
-              onTouchStart={(e) => {
-                const touch = e.touches[0];
-                playerSwipeRef.current = { startY: touch.clientY, startX: touch.clientX };
-              }}
-              onTouchMove={(e) => {
-                const s = playerSwipeRef.current;
-                if (s) {
-                  const dy = e.touches[0].clientY - s.startY;
-                  const dx = e.touches[0].clientX - s.startX;
-                  if (dy > 0 && dy > Math.abs(dx)) {
-                    // Prevent default scrolling on video
-                    if (e.cancelable) e.preventDefault();
-                    // Limit the drag to 150px max
-                    const clampedY = Math.min(dy, 150);
-                    setMainDragY(clampedY);
-                  }
-                }
-              }}
-              onTouchEnd={(e) => {
-                const s = playerSwipeRef.current;
-                if (s) {
-                  const dy = e.changedTouches[0].clientY - s.startY;
-                  if (dy > 80) {
-                    minimizeVideo();
-                  } else if (dy < 10) {
-                    // Treat as click/tap on the video to toggle play/pause
-                    const iframe = document.querySelector("iframe");
-                    if (iframe && iframe.contentWindow) {
-                      // We toggle by sending playVideo (since YouTube API doesn't expose toggle,
-                      // we just play if paused, but if playing it does nothing unless we know state.
-                      // Without state, we send nothing or just play, or we let the user use the miniplayer controls).
-                    }
-                  }
-                }
-                setMainDragY(0);
-                playerSwipeRef.current = null;
-              }}
-            />
-          )}
           <YouTubePlayer
             videoId={activeVideoId}
             autoplay
