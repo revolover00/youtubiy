@@ -7,6 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { registerSW } from "virtual:pwa-register";
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
@@ -86,8 +87,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "YouTube Video Player and Search" },
       { property: "og:type", content: "website" },
       { name: "theme-color", content: "#0f0f0f" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "YouTube" },
     ],
     links: [
+      {
+        rel: "manifest",
+        href: "/manifest.webmanifest",
+      },
       {
         rel: "stylesheet",
         href: appCss,
@@ -130,6 +139,12 @@ function RootComponent() {
     document.documentElement.lang = lang;
     document.documentElement.dir = dir;
   }, [lang, dir]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      registerSW({ immediate: true });
+    }
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -69,20 +69,75 @@ export default function YouTubePlayer({
     const handleVisibility = () => {
       if (document.visibilityState === "hidden" && iframeRef.current?.contentWindow) {
         // Send a play command to override YouTube's auto-pause on blur
-        iframeRef.current.contentWindow.postMessage(
-          JSON.stringify({
-            event: "command",
-            func: "playVideo",
-            args: []
-          }),
-          "*"
-        );
+        // We do this twice with a small delay to ensure it catches the pause event from YouTube
+        const play = () => {
+          iframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+            "*"
+          );
+        };
+        play();
+        setTimeout(play, 100);
+        setTimeout(play, 500);
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
+
+  // Media Session API for background play controls
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !window.MediaSessionMetadata) return;
+
+    navigator.mediaSession.metadata = new window.MediaSessionMetadata({
+      title: title || "فيديو",
+      artist: "YouTube",
+      artwork: [
+        {
+          src: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          sizes: "480x360",
+          type: "image/jpeg",
+        },
+        {
+          src: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
+          sizes: "1280x720",
+          type: "image/jpeg",
+        },
+      ],
+    });
+
+    navigator.mediaSession.setActionHandler("play", () => {
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+        "*"
+      );
+    });
+
+    navigator.mediaSession.setActionHandler("pause", () => {
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
+        "*"
+      );
+    });
+
+    // Handle seek
+    navigator.mediaSession.setActionHandler("seekto", (details) => {
+      if (details.seekTime) {
+        iframeRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event: "command", func: "seekTo", args: [details.seekTime, true] }),
+          "*"
+        );
+      }
+    });
+
+    return () => {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.setActionHandler("play", null);
+      navigator.mediaSession.setActionHandler("pause", null);
+      navigator.mediaSession.setActionHandler("seekto", null);
+    };
+  }, [videoId, title]);
 
   const params = new URLSearchParams({
     autoplay: autoplay ? "1" : "0",
@@ -92,6 +147,7 @@ export default function YouTubePlayer({
     rel: "0",
     modestbranding: "1",
     hl: "ar",
+    origin: typeof window !== "undefined" ? window.location.origin : "",
     // no annotations / info cards / promoted overlays inside the frame
     iv_load_policy: "3",
     disablekb: "0",

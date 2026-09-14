@@ -18,6 +18,7 @@ import Miniplayer from "./components/Miniplayer";
 import ShortsViewer from "./components/ShortsViewer";
 import ChannelPage from "./components/ChannelPage";
 import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
+import PlaylistPage from "./components/PlaylistPage";
 import SettingsDialog from "./components/SettingsDialog";
 import { YouTubeImportModal } from "./components/YouTubeImportModal";
 import { YouTubeSyncBanner } from "./components/YouTubeSyncBanner";
@@ -60,14 +61,7 @@ import type {
   SearchPlaylist,
 } from "./lib/types";
 import { useLanguage } from "./lib/i18n";
-import { useAppStore, appStore } from "./lib/appStore";
-
-type Route =
-  | { type: "home" }
-  | { type: "watch"; video: PipedVideo }
-  | { type: "channel"; id: string }
-  | { type: "subs" }
-  | { type: "library"; key: LibraryKey };
+import { useAppStore, appStore, type RouteState } from "./lib/appStore";
 
 type SearchFilter =
   "All" | "Shorts" | "Unwatched" | "Watched" | "Videos" | "Recently uploaded" | "Live";
@@ -105,7 +99,9 @@ export default function App() {
   const urlSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
   const urlVideoId = pathname === "/watch" ? String(urlSearch?.["v"] ?? "") : "";
 
-  const [route, setRoute] = useState<Route>({ type: "home" });
+  const { route } = useAppStore();
+  const setRoute = appStore.setRoute;
+  
   const [expanded, setExpanded] = useState(true);
   const [drawer, setDrawer] = useState(false);
   const [activeNav, setActiveNav] = useState("home");
@@ -345,6 +341,42 @@ export default function App() {
     }
   };
 
+  const handleSearch = useCallback(
+    (q: string) => {
+      const currentRoute = appStore.getSnapshot().route;
+      if (currentRoute.type === "watch") {
+        const id = videoIdFromUrl(currentRoute.video.url);
+        const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
+        appStore.setMiniplayer({ video: currentRoute.video, time });
+      }
+      appStore.setSearchQ(q);
+      appStore.setSearchFilter("All");
+      setRoute({ type: "home" });
+      if (pathname !== "/") void routerNav({ to: "/" });
+      window.scrollTo({ top: 0 });
+    },
+    [pathname, routerNav, setRoute],
+  );
+
+  const handleLiveSearch = useCallback(
+    (q: string) => {
+      const snapshot = appStore.getSnapshot();
+      if (q === snapshot.searchQ) return;
+
+      if (snapshot.route.type === "watch") {
+        const id = videoIdFromUrl(snapshot.route.video.url);
+        const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
+        appStore.setMiniplayer({ video: snapshot.route.video, time });
+      }
+      appStore.setSearchQ(q);
+      appStore.setSearchFilter("All");
+      if (snapshot.route.type !== "home") {
+        setRoute({ type: "home" });
+      }
+    },
+    [setRoute],
+  );
+
   const expandMiniplayer = () => {
     if (!miniplayer) return;
     const v = miniplayer.video;
@@ -374,75 +406,94 @@ export default function App() {
 
   const openVideo = (v: PipedVideo) => {
     const id = videoIdFromUrl(v.url);
+    if (!id) return;
+    
     appStore.setMiniplayer(null);
     setRoute({ type: "watch", video: v });
-    if (id && id !== urlVideoId) void routerNav({ to: "/watch", search: { v: id } });
+    
+    if (id !== urlVideoId) {
+      void routerNav({ to: "/watch", search: { v: id } });
+    }
     window.scrollTo({ top: 0 });
   };
 
   // keep the in-app view in sync with the address bar (deep links, back/forward)
   useEffect(() => {
-    if (!urlVideoId) {
+    if (urlVideoId) {
+      // If opening full watch view for this video, close miniplayer
+      const curMini = appStore.getSnapshot().miniplayer;
+      if (curMini && videoIdFromUrl(curMini.video.url) === urlVideoId) {
+        appStore.setMiniplayer(null);
+      }
+
+      let alive = true;
       setRoute((r) => {
-        if (r.type === "watch") {
-          const id = videoIdFromUrl(r.video.url);
-          const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
-          appStore.setMiniplayer({ video: r.video, time });
-          return { type: "home" };
-        }
-        return r;
+        // If we already have the correct video in route, don't reset it
+        if (r.type === "watch" && videoIdFromUrl(r.video.url) === urlVideoId) return r;
+
+        return {
+          type: "watch",
+          video: {
+            url: `/watch?v=${urlVideoId}`,
+            title: "",
+            thumbnail: `https://i.ytimg.com/vi/${urlVideoId}/hqdefault.jpg`,
+            uploaderName: "",
+            duration: 0,
+          },
+        };
       });
-      return;
-    }
-    // If opening full watch view for this video, close miniplayer
-    const curMini = appStore.getSnapshot().miniplayer;
-    if (curMini && videoIdFromUrl(curMini.video.url) === urlVideoId) {
-      appStore.setMiniplayer(null);
-    }
-    let alive = true;
-    setRoute((r) => {
-      if (r.type === "watch" && videoIdFromUrl(r.video.url) === urlVideoId) return r;
-      return {
-        type: "watch",
-        video: {
-          url: `/watch?v=${urlVideoId}`,
-          title: "",
-          thumbnail: `https://i.ytimg.com/vi/${urlVideoId}/hqdefault.jpg`,
-          uploaderName: "",
-          duration: 0,
-        },
+      getStreams(urlVideoId)
+        .then((d) => {
+          if (!alive) return;
+          setRoute((r) => {
+            if (r.type !== "watch" || videoIdFromUrl(r.video.url) !== urlVideoId || r.video.title)
+              return r;
+            return {
+              type: "watch",
+              video: {
+                ...r.video,
+                title: d.title,
+                uploaderName: d.uploader,
+                uploaderUrl: d.uploaderUrl,
+                uploaderAvatar: d.uploaderAvatar,
+                views: d.views,
+              },
+            };
+          });
+        })
+        .catch(() => {});
+      return () => {
+        alive = false;
       };
-    });
-    getStreams(urlVideoId)
-      .then((d) => {
-        if (!alive) return;
-        setRoute((r) => {
-          if (r.type !== "watch" || videoIdFromUrl(r.video.url) !== urlVideoId || r.video.title)
-            return r;
-          return {
-            type: "watch",
-            video: {
-              ...r.video,
-              title: d.title,
-              uploaderName: d.uploader,
-              uploaderUrl: d.uploaderUrl,
-              uploaderAvatar: d.uploaderAvatar,
-              views: d.views,
-            },
-          };
-        });
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [urlVideoId]);
+    } else {
+      // No video in URL - handle transitions to Home/Channel/Library
+      setRoute((r) => {
+        // 1. If we are already on a non-watch route, stay there
+        if (r.type !== "watch") return r;
+
+        // 2. Handle minimization from watch to home when URL cleared (e.g. back button)
+        const id = videoIdFromUrl(r.video.url);
+        const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
+        appStore.setMiniplayer({ video: r.video, time });
+        return { type: "home" };
+      });
+    }
+  }, [urlVideoId, setRoute]);
 
   const openChannel = (raw: string) => {
     const id = channelIdFromUrl(raw) || raw;
     if (!id) return;
     setRoute({ type: "channel", id });
     setActiveNav("");
+    if (pathname !== "/") void routerNav({ to: "/" });
+    window.scrollTo({ top: 0 });
+  };
+
+  const openPlaylist = (id: string) => {
+    if (!id) return;
+    setRoute({ type: "playlist", id });
+    setActiveNav("");
+    if (pathname !== "/") void routerNav({ to: "/" });
     window.scrollTo({ top: 0 });
   };
 
@@ -712,28 +763,8 @@ export default function App() {
         inWatch={inWatch}
         onBack={inWatch ? minimizeVideo : goHome}
         searchQuery={searchQ}
-        onSearch={(q) => {
-          if (route.type === "watch") {
-            const id = videoIdFromUrl(route.video.url);
-            const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
-            appStore.setMiniplayer({ video: route.video, time });
-          }
-          appStore.setSearchQ(q);
-          appStore.setSearchFilter("All");
-          setRoute({ type: "home" });
-          if (pathname !== "/") void routerNav({ to: "/" });
-          window.scrollTo({ top: 0 });
-        }}
-        onLiveSearch={(q) => {
-          if (inWatch) {
-            const id = videoIdFromUrl(route.video.url);
-            const time = (id ? appStore.getPlaybackTime(id) : 0) || 0;
-            appStore.setMiniplayer({ video: route.video, time });
-          }
-          appStore.setSearchQ(q);
-          appStore.setSearchFilter("All");
-          setRoute({ type: "home" });
-        }}
+        onSearch={handleSearch}
+        onLiveSearch={handleLiveSearch}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
@@ -786,6 +817,18 @@ export default function App() {
             onToggleSub={doToggleSub}
             onDismiss={(id) => setHidden((h) => [...h, id])}
             onOpenShort={(items, index) => setShorts({ items, index })}
+          />
+        )}
+
+        {route.type === "playlist" && (
+          <PlaylistPage
+            playlistId={route.id}
+            onOpen={openVideo}
+            onChannel={(id) => openChannel(id)}
+            notify={notify}
+            onDismiss={(id) => setHidden((h) => [...h, id])}
+            isSaved={(id) => watchLater.includes(id)}
+            onSaveLater={toggleLater}
           />
         )}
 
@@ -898,7 +941,7 @@ export default function App() {
                         key={p.id}
                         playlist={p}
                         index={i}
-                        onOpen={() => notify(isAr ? "واجهة القوائم" : "Playlist preview")}
+                        onOpen={() => openPlaylist(p.id)}
                       />
                     ))}
                   </div>

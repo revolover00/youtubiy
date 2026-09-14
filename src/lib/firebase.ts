@@ -13,7 +13,7 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = getFirestore(app, "ai-studio-youtubiy-1278634e-3ed7-413d-9d97-686bacfe936e");
 export const auth = getAuth(app);
 
 export const googleProvider = new GoogleAuthProvider();

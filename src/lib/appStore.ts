@@ -6,11 +6,44 @@ export interface MiniplayerState {
   time?: number;
 }
 
+export type LibraryKey =
+  | "السجل"
+  | "History"
+  | "المشاهدة لاحقاً"
+  | "Watch Later"
+  | "مقاطع أعجبتني"
+  | "Liked Videos"
+  | "قوائم التشغيل"
+  | "Playlists"
+  | "مقاطع الفيديو"
+  | "Your Videos"
+  | "التنزيلات"
+  | "Downloads"
+  | "الرائج"
+  | "Trending"
+  | "الموسيقى"
+  | "Music"
+  | "الألعاب"
+  | "Gaming"
+  | "الأخبار"
+  | "News"
+  | "الرياضة"
+  | "Sports";
+
+export type RouteState =
+  | { type: "home" }
+  | { type: "watch"; video: PipedVideo }
+  | { type: "channel"; id: string }
+  | { type: "playlist"; id: string }
+  | { type: "subs" }
+  | { type: "library"; key: LibraryKey };
+
 interface AppStoreState {
   searchQ: string;
   searchFilter: SearchFilter;
   miniplayer: MiniplayerState | null;
   playbackTimes: Record<string, number>;
+  route: RouteState;
 }
 
 let state: AppStoreState = {
@@ -18,6 +51,7 @@ let state: AppStoreState = {
   searchFilter: "All",
   miniplayer: null,
   playbackTimes: {},
+  route: { type: "home" },
 };
 
 const listeners = new Set<() => void>();
@@ -56,6 +90,13 @@ export const appStore = {
 
   setMiniplayer(m: MiniplayerState | null) {
     state = { ...state, miniplayer: m };
+    notify();
+  },
+
+  setRoute(r: RouteState | ((prev: RouteState) => RouteState)) {
+    const next = typeof r === "function" ? r(state.route) : r;
+    if (JSON.stringify(state.route) === JSON.stringify(next)) return;
+    state = { ...state, route: next };
     notify();
   },
 
