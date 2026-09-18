@@ -721,6 +721,11 @@ export default function App() {
   } | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
 
+  const shortsItems = useMemo(
+    () => (feed || []).filter((v) => isShortsVideo(v)).slice(0, 10),
+    [feed],
+  );
+
   const openVideo = useCallback(
     (v: PipedVideo, forceWatch = false) => {
       if (countdownTimerRef.current) {
@@ -1110,10 +1115,6 @@ export default function App() {
     };
   }, [feed, hidden, isSearchActive, searchFilter, watchedSet]);
 
-  const shortsItems = useMemo(
-    () => (feed || []).filter((v) => isShortsVideo(v)).slice(0, 10),
-    [feed],
-  );
   const showShorts =
     route.type === "home" &&
     (chip === "All" || chip === "الكل") &&

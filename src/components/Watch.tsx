@@ -812,12 +812,20 @@ export default function Watch({
     totalCommentsCount > 0 ? fmtViews(totalCommentsCount, lang) : isAr ? "٠" : "0";
 
   return (
-    <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col lg:flex-row gap-6">
-      <div className="flex-1 min-w-0">
+    <div
+      className={`max-w-[1720px] mx-auto px-3 sm:px-6 pt-4 lg:pt-6 flex flex-col gap-6 ${
+        theater ? "lg:max-w-none lg:px-4" : "lg:flex-row"
+      }`}
+    >
+      <KeyboardShortcutsModal open={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+
+      <div className={`flex-1 min-w-0 ${theater ? "lg:px-0" : ""}`}>
         {/* Native player slot */}
         <div
           ref={playerContainerRef}
-          className="relative aspect-video rounded-none lg:rounded-xl overflow-hidden bg-black shadow-lg"
+          className={`relative aspect-video rounded-none overflow-hidden bg-black shadow-lg ${
+            theater ? "lg:rounded-none" : "lg:rounded-xl"
+          }`}
         >
           <div id="watch-player-slot" className="w-full h-full" />
         </div>
@@ -1228,7 +1236,7 @@ export default function Watch({
       </div>
 
       {/* Related / Suggested Videos Column (Infinite Scrolling) */}
-      <aside className="lg:w-[400px] xl:w-[420px] shrink-0">
+      <aside className={`shrink-0 ${theater ? "w-full" : "lg:w-[400px] xl:w-[420px]"}`}>
         <QueuePanel onOpen={onOpen} />
 
         <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
@@ -1247,13 +1255,13 @@ export default function Watch({
           ))}
         </div>
 
-        <div className="space-y-3">
+        <div className={`space-y-3 ${theater ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3" : ""}`}>
           {related.map((r, i) => (
             <VideoCard
               key={r.url}
               video={r}
               index={i}
-              layout="list"
+              layout={theater ? "grid" : "list"}
               onOpen={onOpen}
               onChannel={onChannel}
               notify={notify}
