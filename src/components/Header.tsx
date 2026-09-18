@@ -110,14 +110,6 @@ export default function Header({
     };
   }, []);
 
-  // live results while typing — no need to press Enter
-  useEffect(() => {
-    const q = query.trim();
-    if (!onLiveSearch || q.length < 2) return;
-    const tId = window.setTimeout(() => onLiveSearch(q), 450);
-    return () => window.clearTimeout(tId);
-  }, [query, onLiveSearch]);
-
   // arrow keys walk the suggestions and complete the input
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!sugg.length || !focused) return;

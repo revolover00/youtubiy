@@ -18,6 +18,22 @@ export default defineConfig({
       VitePWA({
         registerType: "autoUpdate",
         includeAssets: ["favicon.svg", "robots.txt"],
+        workbox: {
+          navigateFallback: null,
+          runtimeCaching: [
+            {
+              urlPattern: /^https?.*/,
+              handler: "NetworkFirst",
+              options: {
+                cacheName: "offlineCache",
+                expiration: {
+                  maxEntries: 200,
+                  maxAgeSeconds: 24 * 60 * 60,
+                },
+              },
+            },
+          ],
+        },
         devOptions: {
           enabled: true,
           type: "module",
