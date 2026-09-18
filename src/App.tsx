@@ -68,6 +68,7 @@ import {
   getCustomPlaylists,
   fetchUserProgress,
   savePlaybackProgress,
+  getLocalProgress,
 } from "./lib/store";
 import { useAuth } from "./lib/AuthContext";
 import type {
@@ -240,50 +241,7 @@ export default function App() {
     }
 
     document.title = title === brand ? brand : `${title} - ${brand}`;
-
-    // Sync state to URL
-    if (route.type === "watch") {
-      const vid = videoIdFromUrl(route.video.url);
-      if (vid && urlVideoId !== vid) {
-        void routerNav({ to: "/watch", search: { v: vid } });
-      }
-    } else if (route.type === "channel") {
-      const id = route.id;
-      if (id && (pathname !== "/channel" || urlSearchId !== id)) {
-        void routerNav({ to: "/channel", search: { id } });
-      }
-    } else if (route.type === "playlist") {
-      const id = route.id;
-      if (id && (pathname !== "/playlist" || urlSearchId !== id)) {
-        void routerNav({ to: "/playlist", search: { id } });
-      }
-    } else if (searchQ.trim() && pathname !== "/search") {
-      if (urlSearchQ !== searchQ.trim()) {
-        void routerNav({ to: "/search", search: { q: searchQ.trim() } });
-      }
-    } else if (route.type === "home") {
-      if (pathname !== "/" && pathname !== "/search" && pathname !== "/shorts")
-        void routerNav({ to: "/" });
-    } else if (route.type === "subs") {
-      if (pathname !== "/subscriptions") void routerNav({ to: "/subscriptions" });
-    } else if (route.type === "library") {
-      if (pathname !== "/library" || urlSearchK !== route.key)
-        void routerNav({ to: "/library", search: { k: route.key } });
-    } else if (route.type === "policies") {
-      if (pathname !== "/policies") void routerNav({ to: "/policies" });
-    }
-  }, [
-    route,
-    isAr,
-    t,
-    pathname,
-    urlVideoId,
-    routerNav,
-    searchQ,
-    urlSearchId,
-    urlSearchQ,
-    urlSearchK,
-  ]);
+  }, [route, isAr, t, searchQ]);
 
   // Initial URL -> State sync
   useEffect(() => {
@@ -309,6 +267,7 @@ export default function App() {
         setRoute({ type: "playlist", id: urlSearchId });
     } else if (pathname === "/search") {
       if (urlSearchQ && urlSearchQ !== searchQ) setSearchQ(urlSearchQ);
+      if (route.type !== "home") setRoute({ type: "home" });
     } else if (pathname === "/policies") {
       if (route.type !== "policies") setRoute({ type: "policies" });
     }
@@ -361,7 +320,11 @@ export default function App() {
           items = await buildSubscriptionsFeed(subs);
           next = null;
         } else if (feedKind === "home") {
-          const r = await buildHomeFeed(subs, history, liked);
+          const r = await buildHomeFeed(subs, history, liked, {
+            progress: getLocalProgress(),
+            searches: JSON.parse(localStorage.getItem("yt.searches") || "[]"),
+            useAI: true,
+          });
           items = r.videos;
           next = r.next;
         } else if (feedKind === "trending") {
@@ -500,7 +463,14 @@ export default function App() {
       appStore.setSearchQ(q);
       appStore.setSearchFilter("All");
       setRoute({ type: "home" });
-      if (pathname !== "/") void routerNav({ to: "/" });
+      if (q.trim()) {
+        const prev: string[] = JSON.parse(localStorage.getItem("yt.searches") || "[]");
+        const next = [q.trim(), ...prev.filter((x) => x !== q.trim())].slice(0, 50);
+        localStorage.setItem("yt.searches", JSON.stringify(next));
+        void routerNav({ to: "/search", search: { q: q.trim() } });
+      } else {
+        if (pathname !== "/") void routerNav({ to: "/" });
+      }
       window.scrollTo({ top: 0 });
     },
     [pathname, routerNav, setRoute],

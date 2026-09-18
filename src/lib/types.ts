@@ -153,3 +153,18 @@ export interface AppUser {
   displayName?: string | null;
   photoURL?: string | null;
 }
+
+export interface AIAlgorithmConfig {
+  summary: string;
+  includeTopics: string[];
+  excludeTopics: string[];
+  weights?: {
+    channel?: number;
+    topic?: number;
+    freshness?: number;
+    quality?: number;
+  };
+  minDurationSec?: number | null;
+  maxDurationSec?: number | null;
+  createdAt?: string;
+}

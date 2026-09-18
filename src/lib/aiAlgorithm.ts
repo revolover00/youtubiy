@@ -1,13 +1,18 @@
-import type { AIAlgorithmConfig, HistoryRow, Subscription } from "./types";
+import { aiRerankFn, aiTuneFn } from "./ai.functions";
+import { ageDays, channelIdFromUrl } from "./format";
+import type { AIAlgorithmConfig, PipedVideo } from "./types";
 
 const STORAGE_KEY = "yt_ai_algorithm_config";
+const RERANK_CACHE = "yt_ai_rerank_cache";
+
+const AI_BLEND = 0.4;
+const RERANK_LIMIT = 80;
 
 export function getStoredAIConfig(): AIAlgorithmConfig | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as AIAlgorithmConfig;
+    return raw ? (JSON.parse(raw) as AIAlgorithmConfig) : null;
   } catch {
     return null;
   }
@@ -16,11 +21,8 @@ export function getStoredAIConfig(): AIAlgorithmConfig | null {
 export function saveStoredAIConfig(config: AIAlgorithmConfig | null): void {
   if (typeof window === "undefined") return;
   try {
-    if (!config) {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    }
+    if (!config) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   } catch {
     // ignore
   }
@@ -28,37 +30,122 @@ export function saveStoredAIConfig(config: AIAlgorithmConfig | null): void {
 
 export async function requestAITunedAlgorithm(params: {
   userPrompt: string;
-  language: string;
-  subscriptions: Subscription[];
-  history: HistoryRow[];
+  language?: string;
+  topInterests?: string[];
 }): Promise<AIAlgorithmConfig> {
-  const res = await fetch("/api/ai-algorithm", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const config = await aiTuneFn({
+    data: {
       userPrompt: params.userPrompt,
-      language: params.language,
-      subscriptions: params.subscriptions.map((s) => ({
-        channel_id: s.channel_id,
-        channel_name: s.channel_name,
-      })),
-      history: params.history.map((h) => ({
-        title: h.video_id,
-        channelTitle: h.channel_id,
-      })),
-    }),
+      language: params.language || "ar",
+      topInterests: params.topInterests || [],
+    },
   });
+  saveStoredAIConfig(config);
+  return config;
+}
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Failed to tune algorithm (${res.status}): ${errText}`);
+interface RerankItem {
+  id: string;
+  title: string;
+  score: number;
+  parts: Record<string, number>;
+  source: string;
+}
+
+interface PoolEntry {
+  video: PipedVideo;
+}
+
+function cacheKey(ids: string[], prompt?: string): string {
+  let h = 0;
+  const s = ids.slice(0, 40).join(",") + "|" + (prompt || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return `${RERANK_CACHE}:${h}`;
+}
+
+function readCache(key: string): Record<string, number> | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const { at, scores } = JSON.parse(raw) as { at: number; scores: Record<string, number> };
+    if (Date.now() - at > 30 * 60_000) return null; // 30 mins
+    return scores;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, scores: Record<string, number>) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), scores }));
+  } catch {
+    // ignore
+  }
+}
+
+export async function aiRerank(params: {
+  scored: RerankItem[];
+  pool: Map<string, PoolEntry>;
+  summary: string;
+  userPrompt?: string;
+}): Promise<RerankItem[]> {
+  const { scored, pool, summary } = params;
+
+  const stored = getStoredAIConfig();
+  const userPrompt =
+    params.userPrompt ||
+    (stored
+      ? [
+          stored.summary,
+          stored.includeTopics?.length ? `ركّز على: ${stored.includeTopics.join("، ")}` : "",
+          stored.excludeTopics?.length ? `استبعد: ${stored.excludeTopics.join("، ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(". ")
+      : undefined);
+
+  const head = scored.slice(0, RERANK_LIMIT);
+  const tail = scored.slice(RERANK_LIMIT);
+  const ids = head.map((h) => h.id);
+
+  const key = cacheKey(ids, userPrompt);
+  let scores = readCache(key);
+
+  if (!scores) {
+    const candidates = head.map((h) => {
+      const v = pool.get(h.id)?.video;
+      return {
+        id: h.id,
+        title: h.title.slice(0, 140),
+        channel: v?.uploaderName?.slice(0, 60) || channelIdFromUrl(v?.uploaderUrl || ""),
+        views: v?.views || 0,
+        ageDays: Math.round(ageDays(v?.uploaded, v?.uploadedDate)),
+      };
+    });
+
+    const res = await aiRerankFn({ data: { summary, userPrompt, candidates } });
+    scores = res.scores;
+    writeCache(key, scores);
   }
 
-  const data = (await res.json()) as AIAlgorithmConfig;
-  saveStoredAIConfig(data);
-  return data;
+  const maxBase = Math.max(...head.map((h) => h.score), 0.0001);
+
+  const blended = head
+    .map((h) => {
+      const ai = scores?.[h.id];
+      if (ai === undefined) return h;
+      const base = h.score / maxBase;
+      const mixed = base * (1 - AI_BLEND) + ai * AI_BLEND;
+      return {
+        ...h,
+        score: mixed * maxBase,
+        parts: { ...h.parts, ai },
+        source: `${h.source}+ai`,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return [...blended, ...tail];
 }
 
 export interface AIPresetPrompt {
