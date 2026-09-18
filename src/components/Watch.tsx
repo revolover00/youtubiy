@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
   ThumbsUp,
   ThumbsDown,
@@ -13,8 +14,11 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronUp,
+  Trash2,
+  Play,
 } from "lucide-react";
 import { getCommentsPage, getStreams, searchPaged } from "../lib/api";
+import { appStore, useAppStore } from "../lib/appStore";
 import {
   channelIdFromUrl,
   cleanDateText,
@@ -22,12 +26,77 @@ import {
   fmtViews,
   isLiveStream,
   isShortsVideo,
+  parseChapters,
+  seekTo,
   timeAgo,
   videoIdFromUrl,
 } from "../lib/format";
+
+export function TextWithTimestamps({ text }: { text?: string }) {
+  if (!text) return null;
+
+  // Match timestamps like 0:00, 12:34, 1:23:45, ٠:٠٠ etc.
+  const regex = /(?:[0-9٠-٩]{1,2}:)?[0-9٠-٩]{1,2}:[0-9٠-٩]{2}/g;
+
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const rawTs = match[0];
+    const matchIndex = match.index;
+
+    if (matchIndex > lastIndex) {
+      parts.push(text.slice(lastIndex, matchIndex));
+    }
+
+    const norm = rawTs.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+    const nums = norm.split(":").map(Number);
+    let seconds: number | null = null;
+    if (nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1]) && nums[1] < 60) {
+      seconds = nums[0] * 60 + nums[1];
+    } else if (
+      nums.length === 3 &&
+      !isNaN(nums[0]) &&
+      !isNaN(nums[1]) &&
+      !isNaN(nums[2]) &&
+      nums[1] < 60 &&
+      nums[2] < 60
+    ) {
+      seconds = nums[0] * 3600 + nums[1] * 60 + nums[2];
+    }
+
+    if (seconds !== null) {
+      const s = seconds;
+      parts.push(
+        <button
+          key={`${matchIndex}-${rawTs}`}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            seekTo(s);
+          }}
+          className="text-yt-blue hover:underline font-mono px-1 py-0.5 rounded bg-yt-blue/10 hover:bg-yt-blue/20 transition-colors inline-flex items-center gap-0.5 cursor-pointer text-xs sm:text-sm font-semibold select-none me-0.5"
+        >
+          {rawTs}
+        </button>,
+      );
+    } else {
+      parts.push(rawTs);
+    }
+
+    lastIndex = matchIndex + rawTs.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return <>{parts}</>;
+}
 import { addHistory, setMeta } from "../lib/store";
 import type { PipedComment, PipedVideo, StreamData } from "../lib/types";
-import { Avatar, ErrorState } from "./Feed";
+import { Avatar, ErrorState, VideoCard } from "./Feed";
 import { ShortsIcon } from "./icons";
 import { useLanguage } from "../lib/i18n";
 
@@ -46,6 +115,157 @@ interface Props {
   onMinimize?: () => void;
   startTime?: number;
   onTimeUpdate?: (time: number) => void;
+  onTopRecommendedChange?: (v: PipedVideo | null) => void;
+}
+
+function QueuePanel({ onOpen }: { onOpen: (v: PipedVideo) => void }) {
+  const { isAr } = useLanguage();
+  const { queue, queueIndex } = useAppStore();
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (!queue || queue.length === 0) return null;
+
+  const moveUp = (idx: number) => {
+    if (idx <= 0) return;
+    const newQueue = [...queue];
+    const temp = newQueue[idx];
+    newQueue[idx] = newQueue[idx - 1];
+    newQueue[idx - 1] = temp;
+    let newIndex = queueIndex;
+    if (queueIndex === idx) newIndex = idx - 1;
+    else if (queueIndex === idx - 1) newIndex = idx;
+    appStore.reorderQueue(newQueue, newIndex);
+  };
+
+  const moveDown = (idx: number) => {
+    if (idx >= queue.length - 1) return;
+    const newQueue = [...queue];
+    const temp = newQueue[idx];
+    newQueue[idx] = newQueue[idx + 1];
+    newQueue[idx + 1] = temp;
+    let newIndex = queueIndex;
+    if (queueIndex === idx) newIndex = idx + 1;
+    else if (queueIndex === idx + 1) newIndex = idx;
+    appStore.reorderQueue(newQueue, newIndex);
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-yt-border bg-yt-raised shadow-md overflow-hidden animate-in fade-in duration-200">
+      {/* Queue Header */}
+      <div className="flex items-center justify-between px-3.5 py-2.5 bg-yt-surface/80 border-b border-yt-border/60">
+        <div className="flex items-center gap-2">
+          <ListVideo className="w-4 h-4 text-yt-blue shrink-0" />
+          <h3 className="text-xs sm:text-sm font-bold text-yt-text">
+            {isAr ? "التالي في الطابور" : "Next in queue"}
+          </h3>
+          <span className="text-[11px] text-yt-sub px-2 py-0.5 rounded-full bg-yt-bg font-semibold tabular-nums">
+            {queue.length}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => appStore.clearQueue()}
+            className="text-xs text-yt-sub hover:text-yt-red px-2 py-1 rounded hover:bg-yt-bg transition-colors flex items-center gap-1 font-medium cursor-pointer"
+            title={isAr ? "مسح الطابور" : "Clear queue"}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isAr ? "مسح" : "Clear"}</span>
+          </button>
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="p-1 text-yt-sub hover:text-yt-text rounded hover:bg-yt-bg transition-colors cursor-pointer"
+          >
+            {collapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Queue Items List */}
+      {!collapsed && (
+        <div className="max-h-64 overflow-y-auto divide-y divide-yt-border/20 p-1">
+          {queue.map((item, idx) => {
+            const isPlaying = idx === queueIndex;
+            const id = videoIdFromUrl(item.url);
+            return (
+              <div
+                key={`${id}-${idx}`}
+                className={`group flex items-center gap-2 p-1.5 rounded-lg transition-colors ${
+                  isPlaying ? "bg-yt-blue/15 border border-yt-blue/30" : "hover:bg-yt-surface/60"
+                }`}
+              >
+                {/* Index / Playing icon */}
+                <div className="w-5 text-center text-xs font-mono text-yt-sub shrink-0">
+                  {isPlaying ? (
+                    <Play className="w-3.5 h-3.5 text-yt-blue fill-yt-blue mx-auto animate-pulse" />
+                  ) : (
+                    <span>{idx + 1}</span>
+                  )}
+                </div>
+
+                {/* Thumbnail & Video Info */}
+                <div
+                  onClick={() => {
+                    appStore.setQueueIndex(idx);
+                    onOpen(item);
+                  }}
+                  className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer"
+                >
+                  <div className="relative w-16 aspect-video rounded overflow-hidden bg-black shrink-0">
+                    <img
+                      src={item.thumbnail || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`}
+                      alt={item.title}
+                      className="w-full h-full object-cover"
+                    />
+                    {item.duration > 0 && (
+                      <span className="absolute bottom-0.5 end-0.5 text-[9px] bg-black/80 px-1 rounded text-white font-mono">
+                        {fmtDuration(item.duration)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className={`text-xs font-medium line-clamp-1 ${
+                        isPlaying ? "text-yt-blue font-bold" : "text-yt-text"
+                      }`}
+                    >
+                      {item.title}
+                    </p>
+                    <p className="text-[11px] text-yt-sub truncate">{item.uploaderName}</p>
+                  </div>
+                </div>
+
+                {/* Reorder Up/Down & Remove actions */}
+                <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 shrink-0">
+                  <button
+                    disabled={idx === 0}
+                    onClick={() => moveUp(idx)}
+                    className="p-1 text-yt-sub hover:text-yt-text disabled:opacity-20 hover:bg-yt-bg rounded cursor-pointer"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    disabled={idx === queue.length - 1}
+                    onClick={() => moveDown(idx)}
+                    className="p-1 text-yt-sub hover:text-yt-text disabled:opacity-20 hover:bg-yt-bg rounded cursor-pointer"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => appStore.removeFromQueue(idx)}
+                    className="p-1 text-yt-sub hover:text-yt-red hover:bg-yt-bg rounded cursor-pointer"
+                    title={isAr ? "إزالة من الطابور" : "Remove from queue"}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Watch({
@@ -59,16 +279,18 @@ export default function Watch({
   isSubscribed,
   onToggleSub,
   onMinimize,
+  onTopRecommendedChange,
 }: Props) {
   const { t, isAr, lang } = useLanguage();
+  const { playbackTimes } = useAppStore();
   const id = videoIdFromUrl(video.url);
-  const [data, setData] = useState<StreamData | null>(null);
-  const [error, setError] = useState(false);
+  const currentTime = playbackTimes[id] || 0;
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [disliked, setDisliked] = useState(false);
   const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
   const [showInlineComments, setShowInlineComments] = useState(false);
+  const [chaptersCollapsed, setChaptersCollapsed] = useState(false);
 
   // Comments state & pagination
   const [commentsList, setCommentsList] = useState<PipedComment[]>([]);
@@ -101,45 +323,55 @@ export default function Watch({
     setRelFilter(labels.all);
   }, [labels.all]);
 
-  // Initial video details fetch
+  // Initial video details fetch via React Query
+  const {
+    data,
+    isPending: loading,
+    isError: error,
+    refetch,
+  } = useQuery({
+    queryKey: ["video", id, attempt],
+    queryFn: () => getStreams(id),
+    placeholderData: keepPreviousData,
+    enabled: !!id,
+  });
+
+  const chapters = useMemo(() => parseChapters(data?.description || ""), [data?.description]);
+
+  const activeChapterIndex = useMemo(() => {
+    if (!chapters || chapters.length === 0) return -1;
+    let active = -1;
+    for (let i = 0; i < chapters.length; i++) {
+      if (currentTime >= chapters[i].start) {
+        active = i;
+      } else {
+        break;
+      }
+    }
+    return active;
+  }, [chapters, currentTime]);
+
   useEffect(() => {
-    let alive = true;
-    const controller = new AbortController();
+    if (data) {
+      setCommentsList(data.comments || []);
+      setCommentsCont(data.commentsContinuation);
+      setRelatedStreams(data.relatedStreams || []);
 
-    setData(null);
-    setError(false);
-    setCommentsList([]);
-    setCommentsCont(undefined);
-    setRelatedStreams([]);
-    setRelatedCont(null);
-    setRelatedQueryIndex(0);
-
-    getStreams(id)
-      .then((d) => {
-        if (!alive) return;
-        setData(d);
-        setCommentsList(d.comments || []);
-        setCommentsCont(d.commentsContinuation);
-        setRelatedStreams(d.relatedStreams || []);
-
-        setMeta(id, {
-          title: d.title,
-          thumbnail: video.thumbnail,
-          uploaderName: d.uploader,
-          uploaderAvatar: d.uploaderAvatar,
-          duration: video.duration,
-        });
-      })
-      .catch((err) => {
-        if (err.name === "AbortError") return;
-        if (alive) setError(true);
+      setMeta(id, {
+        title: data.title,
+        thumbnail: video.thumbnail,
+        uploaderName: data.uploader,
+        uploaderAvatar: data.uploaderAvatar,
+        duration: video.duration,
       });
-
-    return () => {
-      alive = false;
-      controller.abort();
-    };
-  }, [id, attempt, video.thumbnail, video.duration]);
+    } else {
+      setCommentsList([]);
+      setCommentsCont(undefined);
+      setRelatedStreams([]);
+      setRelatedCont(null);
+      setRelatedQueryIndex(0);
+    }
+  }, [data, id, video.thumbnail, video.duration]);
 
   // Filtered related videos
   const related = useMemo(() => {
@@ -154,6 +386,14 @@ export default function Watch({
     }
     return list;
   }, [relatedStreams, relFilter, data?.uploader, video.uploaderName, labels]);
+
+  useEffect(() => {
+    if (related && related.length > 0) {
+      onTopRecommendedChange?.(related[0]);
+    } else {
+      onTopRecommendedChange?.(null);
+    }
+  }, [related, onTopRecommendedChange]);
 
   // Endless suggested videos pagination
   const loadMoreRelated = useCallback(async () => {
@@ -317,7 +557,7 @@ export default function Watch({
   if (error) {
     return (
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 pt-6">
-        <ErrorState onRetry={() => setAttempt((a) => a + 1)} message={t("watchError")} />
+        <ErrorState onRetry={() => void refetch()} message={t("watchError")} />
       </div>
     );
   }
@@ -458,6 +698,70 @@ export default function Watch({
           </div>
         </div>
 
+        {/* Video Chapters Box (Collapsible) */}
+        {chapters.length > 0 && (
+          <div className="mt-4 rounded-xl border border-yt-border bg-yt-surface/90 overflow-hidden shadow-xs">
+            <button
+              type="button"
+              onClick={() => setChaptersCollapsed((c) => !c)}
+              className="w-full flex items-center justify-between p-3.5 sm:px-4 text-start font-bold text-sm hover:bg-yt-hover transition-colors cursor-pointer select-none"
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-1 me-2">
+                <ListVideo className="w-4 h-4 text-yt-blue shrink-0" />
+                <span className="shrink-0">{isAr ? "فصول الفيديو" : "Chapters"}</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-yt-raised text-yt-sub tabular-nums shrink-0">
+                  {chapters.length}
+                </span>
+                {activeChapterIndex !== -1 && (
+                  <span className="text-xs text-yt-blue font-medium truncate ms-1 hidden sm:inline">
+                    • {chapters[activeChapterIndex].label}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 text-xs text-yt-sub shrink-0">
+                {chaptersCollapsed ? (
+                  <ChevronDown className="w-4 h-4" />
+                ) : (
+                  <ChevronUp className="w-4 h-4" />
+                )}
+              </div>
+            </button>
+
+            {!chaptersCollapsed && (
+              <div className="border-t border-yt-border/50 divide-y divide-yt-border/20 max-h-64 overflow-y-auto p-1.5 space-y-1">
+                {chapters.map((chap, idx) => {
+                  const isActive = idx === activeChapterIndex;
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => seekTo(chap.start)}
+                      className={`w-full flex items-center gap-3 p-2 rounded-lg text-start transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-yt-blue/20 text-yt-blue font-bold border border-yt-blue/40 shadow-xs"
+                          : "hover:bg-yt-hover text-yt-text/90"
+                      }`}
+                    >
+                      <span
+                        className={`text-xs font-mono px-2 py-0.5 rounded tabular-nums shrink-0 ${
+                          isActive
+                            ? "bg-yt-blue text-black font-bold"
+                            : "bg-yt-bg text-yt-sub font-semibold"
+                        }`}
+                      >
+                        {fmtDuration(chap.start) || "0:00"}
+                      </span>
+                      <span className="text-xs sm:text-sm line-clamp-1 flex-1 min-w-0">
+                        {chap.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Video Description & Metadata Box */}
         <div
           onClick={() => setExpanded((e) => !e)}
@@ -482,7 +786,7 @@ export default function Watch({
               <p
                 className={`whitespace-pre-line ${expanded ? "" : "line-clamp-2 sm:line-clamp-3"}`}
               >
-                {data.description}
+                <TextWithTimestamps text={data.description} />
               </p>
               <button
                 type="button"
@@ -532,7 +836,9 @@ export default function Watch({
                 />
                 <div className="flex-1 min-w-0 text-xs sm:text-[13px] leading-snug">
                   <span className="font-bold text-yt-text me-1.5">@{commentsList[0].author}</span>
-                  <span className="text-yt-sub line-clamp-1">{commentsList[0].commentText}</span>
+                  <span className="text-yt-sub line-clamp-1">
+                    <TextWithTimestamps text={commentsList[0].commentText} />
+                  </span>
                 </div>
               </div>
             ) : (
@@ -675,6 +981,8 @@ export default function Watch({
 
       {/* Related / Suggested Videos Column (Infinite Scrolling) */}
       <aside className="lg:w-[400px] xl:w-[420px] shrink-0">
+        <QueuePanel onOpen={onOpen} />
+
         <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
           {Object.values(labels).map((t) => (
             <button
@@ -692,48 +1000,16 @@ export default function Watch({
         </div>
 
         <div className="space-y-3">
-          {related.map((r) => (
-            <button
+          {related.map((r, i) => (
+            <VideoCard
               key={r.url}
-              onClick={() => onOpen(r)}
-              className="w-full flex gap-2.5 group text-start cursor-pointer"
-            >
-              <div className="relative w-[168px] aspect-video rounded-lg overflow-hidden bg-yt-raised shrink-0">
-                <img
-                  src={r.thumbnail}
-                  alt={r.title}
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
-                {isLiveStream(r) ? (
-                  <span className="absolute bottom-1 end-1 bg-yt-red text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white live-dot" />
-                    {lang === "ar" ? "مباشر" : "LIVE"}
-                  </span>
-                ) : isShortsVideo(r) ? (
-                  <span className="absolute bottom-1 end-1 bg-black/85 text-white text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1">
-                    <ShortsIcon className="w-3 h-3 text-yt-red" />
-                    {fmtDuration(r.duration) || (lang === "ar" ? "شورتس" : "Shorts")}
-                  </span>
-                ) : fmtDuration(r.duration) ? (
-                  <span className="absolute bottom-1 end-1 bg-black/80 text-white text-[11px] font-medium px-1 py-0.5 rounded">
-                    {fmtDuration(r.duration)}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-medium leading-snug line-clamp-2">{r.title}</h4>
-                <div className="text-xs text-yt-sub mt-1 flex items-center gap-1">
-                  {r.uploaderName}
-                  {r.uploaderVerified && <BadgeCheck className="w-3 h-3" />}
-                </div>
-                <div className="text-xs text-yt-sub">
-                  {fmtViews(r.views, lang) && `${fmtViews(r.views, lang)} ${t("views")} · `}
-                  {timeAgo(r.uploaded, r.uploadedDate, lang)}
-                </div>
-              </div>
-            </button>
+              video={r}
+              index={i}
+              layout="list"
+              onOpen={onOpen}
+              onChannel={onChannel}
+              notify={notify}
+            />
           ))}
         </div>
 
@@ -861,7 +1137,9 @@ function CommentRow({
           <span className="font-bold">@{c.author}</span>
           <span className="text-yt-sub">{c.commentedTime}</span>
         </div>
-        <p className="text-sm mt-1 leading-relaxed whitespace-pre-line">{c.commentText}</p>
+        <p className="text-sm mt-1 leading-relaxed whitespace-pre-line">
+          <TextWithTimestamps text={c.commentText} />
+        </p>
         <div className="flex items-center gap-4 mt-2 text-yt-sub">
           <button
             onClick={() => setLiked((l) => !l)}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ListVideo, PlayCircle, Shuffle, Trash2 } from "lucide-react";
 
 import { getPlaylist } from "../lib/api";
@@ -39,45 +40,46 @@ function idsToVideos(ids: string[]): PipedVideo[] {
 export default function PlaylistPage(props: Props) {
   const { playlistId } = props;
   const { t, isAr } = useLanguage();
-  const [data, setData] = useState<PlaylistData | null>(null);
   const [customData, setCustomData] = useState<UserPlaylist | null>(null);
-  const [error, setError] = useState(false);
-  const [attempt, setAttempt] = useState(0);
+  const [customError, setCustomError] = useState(false);
 
   const isCustom = playlistId.startsWith("pl_");
 
-  useEffect(() => {
-    let alive = true;
-    setData(null);
-    setCustomData(null);
-    setError(false);
+  const {
+    data,
+    isPending: loading,
+    isError: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: ["playlist", playlistId],
+    queryFn: () => getPlaylist(playlistId),
+    placeholderData: keepPreviousData,
+    enabled: !isCustom && !!playlistId,
+  });
 
+  useEffect(() => {
     if (isCustom) {
+      setCustomError(false);
       getCustomPlaylists().then((lists) => {
-        if (!alive) return;
         const pl = lists.find((p) => p.id === playlistId);
         if (pl) {
           setCustomData(pl);
         } else {
-          setError(true);
+          setCustomError(true);
         }
       });
     } else {
-      getPlaylist(playlistId)
-        .then((d) => alive && setData(d))
-        .catch(() => alive && setError(true));
+      setCustomData(null);
     }
+  }, [playlistId, isCustom]);
 
-    return () => {
-      alive = false;
-    };
-  }, [playlistId, attempt, isCustom]);
+  const error = isCustom ? customError : queryError;
 
   if (error) {
     return (
       <div className="max-w-[1400px] mx-auto px-3 sm:px-6 pt-6">
         <ErrorState
-          onRetry={() => setAttempt((a) => a + 1)}
+          onRetry={() => void refetch()}
           message={
             isAr ? "تعذّر فتح قائمة التشغيل، حاول مرة أخرى." : "Failed to open playlist, try again."
           }

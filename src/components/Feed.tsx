@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { getStreams } from "../lib/api";
+import { useAppStore } from "../lib/appStore";
 import {
   Clock,
   Share2,
@@ -141,14 +144,18 @@ export function ChipsBar({
 }
 
 function CardMenu({
+  video,
   onDismiss,
+  onDismissChannel,
   notify,
   onSaveLater,
   onAddToPlaylist,
   saved,
   videoUrl,
 }: {
+  video?: PipedVideo;
   onDismiss: () => void;
+  onDismissChannel?: () => void;
   notify: (m: string) => void;
   onSaveLater: () => void;
   onAddToPlaylist?: () => void;
@@ -157,6 +164,22 @@ function CardMenu({
 }) {
   const { t, dir, isAr } = useLanguage();
   const [open, setOpen] = useState(false);
+
+  const handleAddToQueue = () => {
+    if (video) {
+      appStore.addToQueue(video);
+      notify(isAr ? "تمت الإضافة إلى قائمة الانتظار" : "Added to queue");
+    } else {
+      notify(t("addedToQueueToast"));
+    }
+  };
+
+  const handlePlayNext = () => {
+    if (video) {
+      appStore.playNext(video);
+      notify(isAr ? "سيتم تشغيله بعد المقطع الحالي" : "Set to play next");
+    }
+  };
 
   const items = [
     {
@@ -170,9 +193,14 @@ function CardMenu({
       act: () => onAddToPlaylist?.(),
     },
     {
+      icon: ListVideo,
+      label: isAr ? "تشغيل بعد الحالي" : "Play next",
+      act: handlePlayNext,
+    },
+    {
       icon: ListPlus,
       label: t("addToQueue"),
-      act: () => notify(t("addedToQueueToast")),
+      act: handleAddToQueue,
     },
     {
       icon: Share2,
@@ -193,6 +221,16 @@ function CardMenu({
       act: onDismiss,
       danger: true,
     },
+    ...(onDismissChannel
+      ? [
+          {
+            icon: AlertTriangle,
+            label: isAr ? "عدم اقتراح القناة" : "Don't recommend channel",
+            act: onDismissChannel,
+            danger: true,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -249,6 +287,7 @@ export function VideoCard({
   onOpen,
   index,
   onDismiss,
+  onDismissChannel,
   notify,
   onChannel,
   onSaveLater,
@@ -259,7 +298,8 @@ export function VideoCard({
   video: PipedVideo;
   onOpen: (v: PipedVideo) => void;
   index: number;
-  onDismiss: (id: string) => void;
+  onDismiss?: (id: string) => void;
+  onDismissChannel?: (channelId: string) => void;
   notify: (m: string) => void;
   onChannel?: (channelId: string, name: string) => void;
   onSaveLater?: () => void;
@@ -269,18 +309,63 @@ export function VideoCard({
 }) {
   const { lang, t } = useLanguage();
   const id = videoIdFromUrl(video.url);
+  const channelId = channelIdFromUrl(video.uploaderUrl || "");
+
+  const { playbackTimes } = useAppStore();
+  const watched = (id && playbackTimes[id]) || 0;
+  const pct = video.duration > 0 ? Math.min(100, (watched / video.duration) * 100) : 0;
+  const isWatched = pct >= 90;
+
+  const remaining = Math.max(0, video.duration - watched);
+  const remainingStr = fmtDuration(remaining);
+
+  const queryClient = useQueryClient();
+  const cardRef = useRef<HTMLElement>(null);
+  const prefetchedRef = useRef(false);
+
+  const handlePrefetch = useCallback(() => {
+    if (!id || prefetchedRef.current) return;
+    prefetchedRef.current = true;
+    queryClient.prefetchQuery({
+      queryKey: ["video", id],
+      queryFn: () => getStreams(id),
+    });
+  }, [id, queryClient]);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || !id) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          handlePrefetch();
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [id, handlePrefetch]);
 
   const menu = (
     <CardMenu
+      video={video}
       notify={notify}
       saved={!!saved}
       videoUrl={video.url}
       onSaveLater={() => onSaveLater?.()}
       onAddToPlaylist={() => onAddToPlaylist?.()}
       onDismiss={() => {
-        onDismiss(id);
-        notify(t("notInterested"));
+        onDismiss?.(id);
       }}
+      onDismissChannel={
+        channelId
+          ? () => {
+              onDismissChannel?.(channelId);
+            }
+          : undefined
+      }
     />
   );
 
@@ -288,34 +373,65 @@ export function VideoCard({
   const isShort = isShortsVideo(video);
   const durationStr = fmtDuration(video.duration);
 
+  const thumbSrc = id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : video.thumbnail;
+  const srcSet = id
+    ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg 320w, https://i.ytimg.com/vi/${id}/hqdefault.jpg 480w, https://i.ytimg.com/vi/${id}/maxresdefault.jpg 1280w`
+    : undefined;
+
   const thumb = (
     <div className="relative aspect-video rounded-xl overflow-hidden bg-yt-raised transition-all duration-300 ease-out group-hover:scale-[1.02] group-hover:shadow-lg group-hover:shadow-black/25">
       <img
-        src={video.thumbnail}
+        src={thumbSrc}
+        srcSet={srcSet}
+        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
         alt={video.title}
-        loading="lazy"
+        loading={index < 4 ? "eager" : "lazy"}
+        fetchPriority={index < 4 ? "high" : "low"}
+        decoding="async"
         referrerPolicy="no-referrer"
         className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.05]"
       />
       {isLive ? (
-        <span className="absolute bottom-1.5 end-1.5 bg-yt-red text-white text-[11px] sm:text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1.5 shadow-md">
+        <span className="absolute bottom-1.5 end-1.5 bg-yt-red text-white text-[11px] sm:text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1.5 shadow-md z-10">
           <span className="w-2 h-2 rounded-full bg-white live-dot" />
           <span>{lang === "ar" ? "مباشر" : "LIVE"}</span>
         </span>
       ) : isShort ? (
-        <span className="absolute bottom-1.5 end-1.5 bg-black/85 text-white text-[11px] sm:text-xs font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+        <span className="absolute bottom-1.5 end-1.5 bg-black/85 text-white text-[11px] sm:text-xs font-semibold px-1.5 py-0.5 rounded flex items-center gap-1 z-10">
           <ShortsIcon className="w-3.5 h-3.5 text-yt-red" />
           <span>{durationStr || (lang === "ar" ? "شورتس" : "Shorts")}</span>
         </span>
       ) : durationStr ? (
-        <span className="absolute bottom-1.5 end-1.5 text-white text-xs font-semibold px-1.5 py-0.5 rounded bg-black/80">
-          {durationStr}
+        <span className="absolute bottom-1.5 end-1.5 text-white text-xs font-semibold px-1.5 py-0.5 rounded bg-black/80 z-10">
+          {pct >= 2 && pct < 90 && remainingStr ? (
+            <>
+              <span className="group-hover:hidden">{durationStr}</span>
+              <span className="hidden group-hover:inline">
+                {lang === "ar" ? `يتبقى ${remainingStr}` : `${remainingStr} left`}
+              </span>
+            </>
+          ) : (
+            <span>{durationStr}</span>
+          )}
         </span>
       ) : null}
+      {isWatched && (
+        <span className="absolute top-2 start-2 bg-black/80 text-white text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 z-10">
+          {lang === "ar" ? "تمت المشاهدة" : "Watched"}
+        </span>
+      )}
       {saved && (
-        <span className="absolute top-2 end-2 bg-black/75 text-white text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+        <span className="absolute top-2 end-2 bg-black/75 text-white text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 z-10">
           <Clock className="w-3 h-3" /> {lang === "ar" ? "محفوظ" : "Saved"}
         </span>
+      )}
+      {pct >= 2 && (
+        <div className="absolute bottom-0 inset-x-0 h-[3px] bg-white/30 z-10">
+          <div
+            className="h-full bg-yt-red transition-all duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
       )}
     </div>
   );
@@ -323,13 +439,23 @@ export function VideoCard({
   if (layout === "list") {
     return (
       <article
+        ref={cardRef}
+        onMouseEnter={handlePrefetch}
         className="rise group cursor-pointer flex gap-3 sm:gap-4"
-        style={{ animationDelay: `${Math.min(index, 11) * 40}ms` }}
+        style={{
+          contentVisibility: "auto",
+          containIntrinsicSize: "0 140px",
+          ...(index < 12 ? { animationDelay: `${index * 40}ms` } : {}),
+        }}
         onClick={() => onOpen(video)}
       >
         <div className="w-40 sm:w-64 shrink-0">{thumb}</div>
         <div className="flex-1 min-w-0 py-0.5">
-          <h3 className="text-[15px] sm:text-lg font-medium leading-snug line-clamp-2">
+          <h3
+            className={`text-[15px] sm:text-lg font-medium leading-snug line-clamp-2 ${
+              isWatched ? "opacity-60" : ""
+            }`}
+          >
             {video.title}
           </h3>
           <div className="text-[13px] text-yt-sub mt-1">
@@ -359,8 +485,14 @@ export function VideoCard({
 
   return (
     <article
+      ref={cardRef}
+      onMouseEnter={handlePrefetch}
       className="rise group cursor-pointer"
-      style={{ animationDelay: `${Math.min(index, 11) * 50}ms` }}
+      style={{
+        contentVisibility: "auto",
+        containIntrinsicSize: "0 300px",
+        ...(index < 12 ? { animationDelay: `${index * 50}ms` } : {}),
+      }}
       onClick={() => onOpen(video)}
     >
       {thumb}
@@ -376,7 +508,11 @@ export function VideoCard({
           <Avatar src={video.uploaderAvatar} name={video.uploaderName} />
         </button>
         <div className="flex-1 min-w-0">
-          <h3 className="text-[15px] font-medium leading-snug line-clamp-2 text-yt-text group-hover:text-white">
+          <h3
+            className={`text-[15px] font-medium leading-snug line-clamp-2 text-yt-text group-hover:text-white ${
+              isWatched ? "opacity-60" : ""
+            }`}
+          >
             {video.title}
           </h3>
           <button

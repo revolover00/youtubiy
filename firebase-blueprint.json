@@ -77,6 +77,21 @@
         "addedAt": { "type": "string", "description": "Timestamp when added to watch later" }
       },
       "required": ["videoId", "title", "addedAt"]
+    },
+    "DismissedPrefs": {
+      "title": "DismissedPrefs",
+      "description": "User dismissed videos and channels at /users/{userId}/prefs/dismissed",
+      "type": "object",
+      "properties": {
+        "videoIds": {
+          "type": "array",
+          "description": "Array of dismissed video IDs"
+        },
+        "channelIds": {
+          "type": "array",
+          "description": "Array of dismissed channel IDs"
+        }
+      }
     }
   },
   "firestore": {
@@ -99,6 +114,10 @@
     "/users/{userId}/watchLater/{videoId}": {
       "schema": "WatchLaterItem",
       "description": "User watch later queue"
+    },
+    "/users/{userId}/prefs/{prefId}": {
+      "schema": "DismissedPrefs",
+      "description": "User preferences including dismissed items"
     }
   }
 }

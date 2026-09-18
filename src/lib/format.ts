@@ -292,3 +292,76 @@ export function timeAgoAr(
 ): string {
   return timeAgo(uploaded, uploadedDate, lang);
 }
+
+export interface Chapter {
+  start: number;
+  label: string;
+}
+
+export function parseChapters(description: string): Chapter[] {
+  if (!description) return [];
+
+  const lines = description.split(/\r?\n/);
+  const chapters: Chapter[] = [];
+
+  // Match lines containing timestamps like 0:00, 00:00, 1:23:45, 01:23:45
+  const timestampRegex = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/;
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))).trim();
+    if (!line) continue;
+
+    const match = line.match(timestampRegex);
+    if (!match) continue;
+
+    const fullMatch = match[0];
+    const h = match[1] ? parseInt(match[1], 10) : 0;
+    const m = parseInt(match[2], 10);
+    const s = parseInt(match[3], 10);
+
+    if (m >= 60 || s >= 60) continue;
+
+    const startSeconds = h * 3600 + m * 60 + s;
+
+    // Extract label by stripping out the timestamp and leading/trailing punctuation/separators
+    let label = line
+      .replace(fullMatch, "")
+      .replace(/^[\s\-–—:;.)\][]+/, "")
+      .replace(/[\s\-–—:;.)\][]+$/, "")
+      .trim();
+
+    if (!label) {
+      label = `Chapter @ ${fullMatch}`;
+    }
+
+    chapters.push({ start: startSeconds, label });
+  }
+
+  // Conditions required: count >= 3 AND first timestamp equals 0
+  if (chapters.length < 3) return [];
+  if (chapters[0].start !== 0) return [];
+
+  // Validate ascending order
+  for (let i = 1; i < chapters.length; i++) {
+    if (chapters[i].start <= chapters[i - 1].start) {
+      return [];
+    }
+  }
+
+  return chapters;
+}
+
+export function seekTo(seconds: number) {
+  if (typeof window === "undefined" || seconds < 0) return;
+  const iframe = document.querySelector("#persistent-player iframe") as HTMLIFrameElement;
+  if (iframe?.contentWindow) {
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: "command", func: "seekTo", args: [seconds, true] }),
+      "*",
+    );
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+      "*",
+    );
+  }
+}

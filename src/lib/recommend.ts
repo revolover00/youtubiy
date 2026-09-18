@@ -1,4 +1,4 @@
-import { getChannel, getStreams, searchPaged, trendingPaged } from "./api";
+import { getChannel, getStreams, homeCandidates, searchPaged, trendingPaged } from "./api";
 import { ageDays, channelIdFromUrl, isShortsVideo, videoIdFromUrl } from "./format";
 import {
   buildTasteProfile,
@@ -7,6 +7,7 @@ import {
   topicMatch,
   type TasteProfile,
 } from "./signals";
+import { getDismissed } from "./store";
 import type { HistoryRow, PipedVideo, Subscription } from "./types";
 
 export const WEIGHTS = {
@@ -107,35 +108,19 @@ async function generateCandidates(
 
   const queries = profile.topInterests.slice(0, 4);
 
-  const [trendingPage] = await Promise.all([
-    trendingPaged().catch(() => ({ items: [] as PipedVideo[], next: null })),
-    Promise.allSettled(
-      rankedSubs.map(async (s) => {
-        const ch = await getChannel(s.channel_id);
-        (ch.relatedStreams || []).slice(0, 8).forEach((v) => addCandidate(pool, v, "sub"));
-      }),
-    ),
-    Promise.allSettled(
-      [...new Set(seeds)].map(async (videoId) => {
-        const st = await getStreams(videoId);
-        (st.relatedStreams || []).slice(0, 15).forEach((v) => {
-          const id = videoIdFromUrl(v.url);
-          if (id) relatedIds.add(id);
-          addCandidate(pool, v, "related");
-        });
-      }),
-    ),
-    Promise.allSettled(
-      queries.map(async (q) => {
-        const r = await searchPaged(q);
-        r.items.slice(0, 12).forEach((v) => addCandidate(pool, v, "interest"));
-      }),
-    ),
-  ]);
+  const res = await homeCandidates({
+    channelIds: rankedSubs.map((s) => s.channel_id),
+    seedVideoIds: [...new Set(seeds)],
+    queries,
+  });
 
-  trendingPage.items.forEach((v) => addCandidate(pool, v, "trending"));
+  res.subs.forEach((v) => addCandidate(pool, v, "sub"));
+  res.related.forEach((v) => addCandidate(pool, v, "related"));
+  res.relatedIds.forEach((id) => relatedIds.add(id));
+  res.interest.forEach((v) => addCandidate(pool, v, "interest"));
+  res.trending.forEach((v) => addCandidate(pool, v, "trending"));
 
-  return { pool, relatedIds, next: trendingPage.next };
+  return { pool, relatedIds, next: res.trendingNext };
 }
 
 function rank(
@@ -223,6 +208,7 @@ function diversify(scored: ScoredItem[], pool: Map<string, Candidate>, size: num
 export interface BuildFeedOptions {
   progress?: Record<string, number>;
   searches?: string[];
+  dismissed?: { videoIds: string[]; channelIds: string[] };
   useAI?: boolean;
   aiPrompt?: string;
   size?: number;
@@ -234,9 +220,9 @@ export async function buildHomeFeed(
   likedIds: string[] = [],
   options: BuildFeedOptions = {},
 ): Promise<FeedResult> {
-  const { progress = {}, searches = [], size = FEED_SIZE, useAI = false, aiPrompt } = options;
+  const { progress = {}, searches = [], dismissed = getDismissed(), size = FEED_SIZE } = options;
 
-  const profile = buildTasteProfile({ history, progress, likedIds, subs, searches });
+  const profile = buildTasteProfile({ history, progress, likedIds, subs, searches, dismissed });
   lastProfile = profile;
   lastWatched = new Set(profile.watched);
   const coldStart = profile.signalCount < 5;
@@ -261,21 +247,7 @@ export async function buildHomeFeed(
   }
 
   const { pool, relatedIds, next } = await generateCandidates(profile, subs, history, likedIds);
-  let scored = rank(pool, profile, relatedIds);
-
-  if (useAI && scored.length > 12) {
-    try {
-      const { aiRerank } = await import("./aiAlgorithm");
-      scored = await aiRerank({
-        scored,
-        pool,
-        summary: profileSummary(profile),
-        userPrompt: aiPrompt,
-      });
-    } catch {
-      // ignore
-    }
-  }
+  const scored = rank(pool, profile, relatedIds);
 
   const finalItems = diversify(scored, pool, size * 4);
   const allVideos = finalItems
@@ -299,6 +271,55 @@ export async function buildHomeFeed(
 
   return { videos, reserve, coldStart: false, next, debug: finalItems };
 }
+
+export async function rerankUnseenWithAI(
+  feedResult: FeedResult,
+  profile: TasteProfile,
+  aiPrompt?: string,
+): Promise<FeedResult> {
+  if (!feedResult.debug || feedResult.debug.length === 0) return feedResult;
+  if (feedResult.videos.length <= 8) return feedResult;
+
+  const visibleHead = feedResult.videos.slice(0, 8);
+  const headIds = new Set(visibleHead.map((v) => videoIdFromUrl(v.url)).filter(Boolean));
+
+  const unseenScored = feedResult.debug.filter((item) => !headIds.has(item.id));
+  if (unseenScored.length <= 4) return feedResult;
+
+  try {
+    const { aiRerank } = await import("./aiAlgorithm");
+    const pool = new Map<string, Candidate>();
+    [...feedResult.videos, ...feedResult.reserve].forEach((v) => {
+      const id = videoIdFromUrl(v.url);
+      if (id) pool.set(id, { video: v, sources: new Set(["ai"]) });
+    });
+
+    const rerankedScored = await aiRerank({
+      scored: unseenScored,
+      pool,
+      summary: profileSummary(profile),
+      userPrompt: aiPrompt,
+    });
+
+    const rerankedVideos = rerankedScored
+      .map((item) => pool.get(item.id)?.video)
+      .filter((v): v is PipedVideo => Boolean(v));
+
+    const newVideos = [...visibleHead, ...rerankedVideos.slice(0, feedResult.videos.length - 8)];
+    const newReserve = rerankedVideos.slice(feedResult.videos.length - 8);
+
+    return {
+      ...feedResult,
+      videos: newVideos,
+      reserve: newReserve,
+      debug: feedResult.debug,
+    };
+  } catch {
+    return feedResult;
+  }
+}
+
+export { lastProfile };
 
 export function rankIncoming(items: PipedVideo[]): PipedVideo[] {
   if (!lastProfile) return items;

@@ -146,6 +146,7 @@ export interface BuildProfileInput {
   likedIds: string[];
   subs: Subscription[];
   searches?: string[];
+  dismissed?: { videoIds: string[]; channelIds: string[] };
 }
 
 function engagement(row: HistoryRow, watchedSeconds: number): number {
@@ -165,13 +166,17 @@ function bump(map: Map<string, number>, key: string, value: number) {
 }
 
 export function buildTasteProfile(input: BuildProfileInput): TasteProfile {
-  const { history, progress, likedIds, subs, searches = [] } = input;
+  const { history, progress, likedIds, subs, searches = [], dismissed } = input;
 
   const channels = new Map<string, number>();
   const rawTopics = new Map<string, number>();
   const channelNegatives = new Map<string, number>();
   const watched = new Set<string>();
   const resumable: string[] = [];
+
+  if (dismissed?.videoIds) {
+    dismissed.videoIds.forEach((id) => watched.add(id));
+  }
 
   const liked = new Set(likedIds);
   let completionSum = 0;
@@ -223,6 +228,9 @@ export function buildTasteProfile(input: BuildProfileInput): TasteProfile {
   });
 
   const muted = new Set<string>();
+  if (dismissed?.channelIds) {
+    dismissed.channelIds.forEach((chId) => muted.add(chId));
+  }
   for (const [chId, neg] of channelNegatives) {
     if (neg >= 3 && (channels.get(chId) || 0) <= 0) muted.add(chId);
   }

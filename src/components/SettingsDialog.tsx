@@ -7,6 +7,7 @@ import {
   Check,
   AlertCircle,
   Play,
+  PlayCircle,
   Download,
   Smartphone,
   ShieldCheck,
@@ -33,7 +34,7 @@ export default function SettingsDialog({
 }: Props) {
   const { lang, setLang, t, dir, isAr } = useLanguage();
   const [confirmClear, setConfirmClear] = useState(false);
-  const { backgroundPlay } = useAppStore();
+  const { backgroundPlay, autoplayNext } = useAppStore();
   const { isInstallable, isInstalled, isIOS, install } = usePWA();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
@@ -44,6 +45,20 @@ export default function SettingsDialog({
     appStore.setBackgroundPlay(next);
     persistBackgroundPlay(next);
     notify(t("playbackUpdatedToast"));
+  };
+
+  const toggleAutoplayNext = () => {
+    const next = !autoplayNext;
+    appStore.setAutoplayNext(next);
+    notify(
+      next
+        ? isAr
+          ? "تم تفعيل التشغيل التلقائي"
+          : "Autoplay enabled"
+        : isAr
+          ? "تم إيقاف التشغيل التلقائي"
+          : "Autoplay disabled",
+    );
   };
 
   const handleClearHistory = async () => {
@@ -145,7 +160,7 @@ export default function SettingsDialog({
             <p className="text-xs text-yt-sub leading-relaxed">{t("settingsBackgroundPlayDesc")}</p>
             <button
               onClick={toggleBackgroundPlay}
-              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface transition-colors"
+              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface transition-colors cursor-pointer"
             >
               <span className="text-sm font-medium">
                 {backgroundPlay ? t("enabled") : t("disabled")}
@@ -158,6 +173,40 @@ export default function SettingsDialog({
                 <div
                   className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
                     backgroundPlay ? (isAr ? "right-7" : "left-7") : isAr ? "right-1" : "left-1"
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+
+          <hr className="border-yt-border" />
+
+          {/* Autoplay Next Video */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5 text-base font-bold text-yt-text">
+              <PlayCircle className="w-5 h-5 text-yt-blue" />
+              <span>{isAr ? "التشغيل التلقائي" : "Autoplay"}</span>
+            </div>
+            <p className="text-xs text-yt-sub leading-relaxed">
+              {isAr
+                ? "تشغيل الفيديو التالي تلقائياً عند انتهاء المقطع الحالي"
+                : "Automatically play the next video when the current video ends"}
+            </p>
+            <button
+              onClick={toggleAutoplayNext}
+              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface transition-colors cursor-pointer"
+            >
+              <span className="text-sm font-medium">
+                {autoplayNext ? t("enabled") : t("disabled")}
+              </span>
+              <div
+                className={`w-12 h-6 rounded-full transition-colors relative ${
+                  autoplayNext ? "bg-yt-blue" : "bg-yt-surface"
+                }`}
+              >
+                <div
+                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                    autoplayNext ? (isAr ? "right-7" : "left-7") : isAr ? "right-1" : "left-1"
                   }`}
                 />
               </div>

@@ -12,6 +12,7 @@ interface Props {
   title?: string;
   startTime?: number;
   onTimeUpdate?: (currentTime: number) => void;
+  onEnded?: () => void;
 }
 
 /**
@@ -29,6 +30,7 @@ export default function YouTubePlayer({
   title = "مشغّل الفيديو",
   startTime,
   onTimeUpdate,
+  onEnded,
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { backgroundPlay, preferredQuality } = useAppStore();
@@ -55,6 +57,13 @@ export default function YouTubePlayer({
           if (typeof info.currentTime === "number") {
             onTimeUpdate?.(info.currentTime);
           }
+          if (info.playerState === 0) {
+            onEnded?.();
+          }
+        } else if (data.event === "onStateChange") {
+          if (data.info === 0 || data.data === 0 || data.playerState === 0) {
+            onEnded?.();
+          }
         }
       } catch {
         // Ignore non-json messages
@@ -63,7 +72,7 @@ export default function YouTubePlayer({
 
     window.addEventListener("message", handleMsg);
     return () => window.removeEventListener("message", handleMsg);
-  }, [onTimeUpdate]);
+  }, [onTimeUpdate, onEnded]);
 
   // Activate YouTube JS API listening on load
   const handleIframeLoad = () => {

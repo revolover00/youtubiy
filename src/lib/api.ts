@@ -18,6 +18,7 @@ import {
   videoDetailsFn,
   browsePageFn,
   commentsPageFn,
+  homeCandidatesFn,
 } from "./youtube.functions";
 import type {
   ChannelData,
@@ -145,4 +146,12 @@ export async function getCommentsPage(
   token: string,
 ): Promise<{ items: PipedComment[]; nextContinuation?: string }> {
   return run("تعليقات إضافية", () => commentsPageFn({ data: { token } }));
+}
+
+export async function homeCandidates(params: {
+  channelIds: string[];
+  seedVideoIds: string[];
+  queries: string[];
+}) {
+  return run("تجميع المرشحات للصفحة الرئيسية", () => homeCandidatesFn({ data: params }));
 }

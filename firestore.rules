@@ -91,6 +91,11 @@ service cloud.firestore {
         data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
+    function isValidPref(data) {
+      return (!('videoIds' in data) || data.videoIds is list) &&
+        (!('channelIds' in data) || data.channelIds is list);
+    }
+
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false;
@@ -144,6 +149,14 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidWatchLaterItem(incoming(), videoId);
         allow update: if isOwner(userId) && isValidId(userId) && isValidId(videoId) && isValidWatchLaterItem(incoming(), videoId);
         allow delete: if isOwner(userId) && isValidId(userId) && isValidId(videoId);
+      }
+
+      match /prefs/{prefId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(prefId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(prefId) && isValidPref(incoming());
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(prefId) && isValidPref(incoming());
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(prefId);
       }
     }
   }

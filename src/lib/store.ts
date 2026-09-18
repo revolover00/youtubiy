@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   updateDoc,
@@ -781,4 +782,100 @@ export async function fetchUserLiked(): Promise<string[]> {
   } catch {
     return local;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Dismissed Preferences (Not Interested / Muted Channels)            */
+/* ------------------------------------------------------------------ */
+
+export function getDismissed(): { videoIds: string[]; channelIds: string[] } {
+  return read<{ videoIds: string[]; channelIds: string[] }>("yt.dismissed", {
+    videoIds: [],
+    channelIds: [],
+  });
+}
+
+export function setDismissed(data: { videoIds: string[]; channelIds: string[] }) {
+  write("yt.dismissed", data);
+}
+
+export async function fetchDismissed(): Promise<{ videoIds: string[]; channelIds: string[] }> {
+  const local = getDismissed();
+  const currentUser = auth.currentUser;
+  if (!currentUser) return local;
+
+  const docPath = `users/${currentUser.uid}/prefs/dismissed`;
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "prefs", "dismissed");
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const remote = {
+        videoIds: Array.isArray(data.videoIds) ? data.videoIds : [],
+        channelIds: Array.isArray(data.channelIds) ? data.channelIds : [],
+      };
+      const merged = {
+        videoIds: Array.from(new Set([...local.videoIds, ...remote.videoIds])),
+        channelIds: Array.from(new Set([...local.channelIds, ...remote.channelIds])),
+      };
+      setDismissed(merged);
+      return merged;
+    }
+  } catch {
+    // Fall back to local
+  }
+  return local;
+}
+
+export async function syncDismissedToCloud(data: {
+  videoIds: string[];
+  channelIds: string[];
+}): Promise<void> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+
+  const docPath = `users/${currentUser.uid}/prefs/dismissed`;
+  try {
+    const docRef = doc(db, "users", currentUser.uid, "prefs", "dismissed");
+    await setDoc(docRef, data, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function dismissVideo(videoId: string): Promise<void> {
+  if (!videoId) return;
+  const current = getDismissed();
+  if (!current.videoIds.includes(videoId)) {
+    const updated = {
+      ...current,
+      videoIds: [videoId, ...current.videoIds],
+    };
+    setDismissed(updated);
+    await syncDismissedToCloud(updated);
+  }
+}
+
+export async function dismissChannel(channelId: string): Promise<void> {
+  if (!channelId) return;
+  const current = getDismissed();
+  if (!current.channelIds.includes(channelId)) {
+    const updated = {
+      ...current,
+      channelIds: [channelId, ...current.channelIds],
+    };
+    setDismissed(updated);
+    await syncDismissedToCloud(updated);
+  }
+}
+
+export async function undoDismiss(id: string): Promise<void> {
+  if (!id) return;
+  const current = getDismissed();
+  const updated = {
+    videoIds: current.videoIds.filter((v) => v !== id),
+    channelIds: current.channelIds.filter((c) => c !== id),
+  };
+  setDismissed(updated);
+  await syncDismissedToCloud(updated);
 }

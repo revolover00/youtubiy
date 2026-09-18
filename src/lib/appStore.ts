@@ -37,7 +37,7 @@ export type RouteState =
   | { type: "library"; key: LibraryKey }
   | { type: "policies" };
 
-interface AppStoreState {
+export interface AppStoreState {
   searchQ: string;
   searchFilter: SearchFilter;
   miniplayer: MiniplayerState | null;
@@ -45,15 +45,30 @@ interface AppStoreState {
   preferredQuality: string;
   backgroundPlay: boolean;
   route: RouteState;
+  queue: PipedVideo[];
+  queueIndex: number;
+  autoplayNext: boolean;
 }
 
 let initialPlaybackTimes = {};
 let initialQuality = "auto";
+let initialQueue: PipedVideo[] = [];
+let initialQueueIndex = 0;
+let initialAutoplay = true;
+
 try {
   const savedProgress = localStorage.getItem("yt.progress");
   if (savedProgress) initialPlaybackTimes = JSON.parse(savedProgress);
   const savedQuality = localStorage.getItem("yt.quality");
   if (savedQuality) initialQuality = savedQuality;
+  const savedQueue = localStorage.getItem("yt.queue");
+  if (savedQueue) {
+    const parsed = JSON.parse(savedQueue);
+    if (Array.isArray(parsed.queue)) initialQueue = parsed.queue;
+    if (typeof parsed.queueIndex === "number") initialQueueIndex = parsed.queueIndex;
+  }
+  const savedAutoplay = localStorage.getItem("yt.autoplay");
+  if (savedAutoplay !== null) initialAutoplay = JSON.parse(savedAutoplay);
 } catch (e) {
   // Silent fail
 }
@@ -66,6 +81,9 @@ let state: AppStoreState = {
   preferredQuality: initialQuality,
   backgroundPlay: true,
   route: { type: "home" },
+  queue: initialQueue,
+  queueIndex: initialQueueIndex,
+  autoplayNext: initialAutoplay,
 };
 
 const listeners = new Set<() => void>();
@@ -73,6 +91,22 @@ const listeners = new Set<() => void>();
 function notify() {
   for (const listener of listeners) {
     listener();
+  }
+}
+
+function persistQueue(queue: PipedVideo[], queueIndex: number) {
+  try {
+    localStorage.setItem("yt.queue", JSON.stringify({ queue, queueIndex }));
+  } catch (e) {
+    // Silent fail
+  }
+}
+
+function persistAutoplay(enabled: boolean) {
+  try {
+    localStorage.setItem("yt.autoplay", JSON.stringify(enabled));
+  } catch (e) {
+    // Silent fail
   }
 }
 
@@ -147,6 +181,85 @@ export const appStore = {
 
   getPlaybackTime(id: string): number {
     return state.playbackTimes[id] || 0;
+  },
+
+  addToQueue(v: PipedVideo) {
+    if (!v) return;
+    const nextQueue = [...state.queue, v];
+    state = { ...state, queue: nextQueue };
+    persistQueue(nextQueue, state.queueIndex);
+    notify();
+  },
+
+  playNext(v: PipedVideo) {
+    if (!v) return;
+    const nextQueue = [...state.queue];
+    if (nextQueue.length === 0) {
+      nextQueue.push(v);
+      state = { ...state, queue: nextQueue, queueIndex: 0 };
+    } else {
+      const insertAt = Math.min(state.queueIndex + 1, nextQueue.length);
+      nextQueue.splice(insertAt, 0, v);
+      state = { ...state, queue: nextQueue };
+    }
+    persistQueue(state.queue, state.queueIndex);
+    notify();
+  },
+
+  removeFromQueue(index: number) {
+    if (index < 0 || index >= state.queue.length) return;
+    const nextQueue = state.queue.filter((_, i) => i !== index);
+    let nextIndex = state.queueIndex;
+    if (index < state.queueIndex) {
+      nextIndex = Math.max(0, state.queueIndex - 1);
+    } else if (nextIndex >= nextQueue.length) {
+      nextIndex = Math.max(0, nextQueue.length - 1);
+    }
+    state = { ...state, queue: nextQueue, queueIndex: nextIndex };
+    persistQueue(nextQueue, nextIndex);
+    notify();
+  },
+
+  clearQueue() {
+    state = { ...state, queue: [], queueIndex: 0 };
+    persistQueue([], 0);
+    notify();
+  },
+
+  setQueueIndex(index: number) {
+    if (index < 0 || index >= state.queue.length) return;
+    state = { ...state, queueIndex: index };
+    persistQueue(state.queue, index);
+    notify();
+  },
+
+  advanceQueue(): PipedVideo | null {
+    if (state.queueIndex + 1 < state.queue.length) {
+      const nextIndex = state.queueIndex + 1;
+      const nextVideo = state.queue[nextIndex];
+      state = { ...state, queueIndex: nextIndex };
+      persistQueue(state.queue, nextIndex);
+      notify();
+      return nextVideo;
+    }
+    return null;
+  },
+
+  reorderQueue(newQueue: PipedVideo[], newIndex?: number) {
+    const idx =
+      newIndex !== undefined
+        ? newIndex
+        : Math.min(state.queueIndex, Math.max(0, newQueue.length - 1));
+    state = { ...state, queue: newQueue, queueIndex: idx };
+    persistQueue(newQueue, idx);
+    notify();
+  },
+
+  setAutoplayNext(enabled: boolean) {
+    if (state.autoplayNext === enabled) return;
+    state = { ...state, autoplayNext: enabled };
+    persistAutoplay(enabled);
+    notify();
   },
 };
 

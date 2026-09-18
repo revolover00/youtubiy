@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
+import {
   Home,
   Plus,
   ListVideo,
@@ -11,6 +17,7 @@ import {
   UserRound,
   Loader2,
   ChevronDown,
+  Play,
 } from "lucide-react";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
@@ -38,7 +45,13 @@ import {
   Avatar,
 } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
-import { buildHomeFeed, buildSubscriptionsFeed, rankIncoming } from "./lib/recommend";
+import {
+  buildHomeFeed,
+  buildSubscriptionsFeed,
+  rankIncoming,
+  rerankUnseenWithAI,
+} from "./lib/recommend";
+import { buildTasteProfile } from "./lib/signals";
 import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import {
@@ -69,6 +82,11 @@ import {
   fetchUserProgress,
   savePlaybackProgress,
   getLocalProgress,
+  getDismissed,
+  fetchDismissed,
+  dismissVideo,
+  dismissChannel,
+  undoDismiss,
 } from "./lib/store";
 import { useAuth } from "./lib/AuthContext";
 import type {
@@ -142,7 +160,15 @@ export default function App() {
   const [playlistTargetVideo, setPlaylistTargetVideo] = useState<PipedVideo | null>(null);
   const [hidden, setHidden] = useState<string[]>([]);
   const [shorts, setShorts] = useState<{ items: PipedVideo[]; index: number } | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<
+    | {
+        message: string;
+        actionLabel?: string;
+        onAction?: () => void;
+      }
+    | string
+    | null
+  >(null);
   const toastTimer = useRef<number | null>(null);
 
   // persisted state
@@ -154,29 +180,34 @@ export default function App() {
   const [signalsReady, setSignalsReady] = useState(false);
 
   // feed
-  const [feed, setFeed] = useState<PipedVideo[] | null>(null);
-  const [channels, setChannels] = useState<SearchChannel[]>([]);
-  const [playlists, setPlaylists] = useState<SearchPlaylist[]>([]);
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [feedErr, setFeedErr] = useState(false);
   const [feedAttempt, setFeedAttempt] = useState(0);
-  const feedNext = useRef<unknown | null>(null);
   const feedReserve = useRef<PipedVideo[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const feedGen = useRef(0);
 
-  const notify = useCallback((msg: string) => {
-    setToast(msg);
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
-  }, []);
+  const notify = useCallback(
+    (
+      msg:
+        | string
+        | {
+            message: string;
+            actionLabel?: string;
+            onAction?: () => void;
+          },
+      durationMs = 2600,
+    ) => {
+      setToast(msg);
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+      toastTimer.current = window.setTimeout(() => setToast(null), durationMs);
+    },
+    [],
+  );
 
   // initial load and user change sync
   useEffect(() => {
     setSignalsReady(false);
 
+    fetchDismissed().catch(() => {});
     getCustomPlaylists()
       .then(setCustomPlaylists)
       .catch(() => {});
@@ -309,122 +340,228 @@ export default function App() {
         ? "trending"
         : "search";
 
-  useEffect(() => {
-    if (!isFeedMode) return;
-    if (feedKind === "home" && !signalsReady) {
-      setFeed(null);
-      return;
+  const feedQueryKey = useMemo(() => {
+    if (route.type === "subs") {
+      return ["subs", subs.length, feedAttempt];
     }
-    const gen = ++feedGen.current;
-    setFeed(null);
-    setChannels([]);
-    setPlaylists([]);
-    setFeedErr(false);
-    setHasMore(false);
-    feedNext.current = null;
+    if (feedKind === "home") {
+      return [
+        "home-feed",
+        user?.uid || "guest",
+        `${history.length}-${subs.length}-${liked.length}-${feedAttempt}`,
+      ];
+    }
+    if (feedKind === "trending") {
+      return ["trending", feedAttempt];
+    }
+    return ["search", feedQuery, feedAttempt];
+  }, [
+    route.type,
+    feedKind,
+    feedQuery,
+    feedAttempt,
+    user?.uid,
+    history.length,
+    subs.length,
+    liked.length,
+  ]);
+
+  const queryClient = useQueryClient();
+
+  const {
+    data: infiniteFeedData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isError: feedErr,
+    refetch: refetchFeed,
+  } = useInfiniteQuery({
+    queryKey: feedQueryKey,
+    enabled: isFeedMode && (feedKind !== "home" || signalsReady),
+    initialPageParam: null as unknown,
+    placeholderData: keepPreviousData,
+    queryFn: async ({ pageParam }) => {
+      if (route.type === "subs") {
+        const items = await buildSubscriptionsFeed(subs);
+        return { items, next: null, channels: [], playlists: [] };
+      }
+
+      if (feedKind === "home") {
+        if (pageParam === null) {
+          // Fast initial paint with trending
+          const r = await trendingPaged();
+          return { items: r.items, next: r.next, channels: [], playlists: [] };
+        } else {
+          if (feedReserve.current.length > 0) {
+            const nextBatch = feedReserve.current.splice(0, 20);
+            return {
+              items: nextBatch,
+              next: pageParam,
+              channels: [],
+              playlists: [],
+            };
+          }
+          if (pageParam) {
+            const r = await trendingPaged(pageParam);
+            const ranked = rankIncoming(r.items);
+            return { items: ranked, next: r.next, channels: [], playlists: [] };
+          }
+          return { items: [], next: null, channels: [], playlists: [] };
+        }
+      }
+
+      if (feedKind === "trending") {
+        const r = await trendingPaged(pageParam as string | null);
+        return { items: r.items, next: r.next, channels: [], playlists: [] };
+      }
+
+      // search
+      const r = await searchPaged(feedQuery, pageParam as string | null);
+      return {
+        items: r.items,
+        next: r.next,
+        channels: r.channels || [],
+        playlists: r.playlists || [],
+      };
+    },
+    getNextPageParam: (lastPage) => {
+      if (feedKind === "home") {
+        if (feedReserve.current.length > 0) {
+          return lastPage.next ?? "has_reserve";
+        }
+        return lastPage.next ?? undefined;
+      }
+      return lastPage.next ?? undefined;
+    },
+  });
+
+  // Progressive rendering for home feed: calculate candidates after initial fast paint
+  useEffect(() => {
+    if (!isFeedMode || feedKind !== "home" || !signalsReady) return;
+
+    let cancelled = false;
 
     (async () => {
       try {
-        let items: PipedVideo[];
-        let chans: SearchChannel[] = [];
-        let plays: SearchPlaylist[] = [];
-        let next: unknown | null;
-        if (route.type === "subs") {
-          items = await buildSubscriptionsFeed(subs);
-          next = null;
-        } else if (feedKind === "home") {
-          const r = await buildHomeFeed(subs, history, liked, {
-            progress: getLocalProgress(),
-            searches: JSON.parse(localStorage.getItem("yt.searches") || "[]"),
-            useAI: false,
-          });
-          items = r.videos;
-          next = r.next;
-          feedReserve.current = r.reserve || [];
-        } else if (feedKind === "trending") {
-          const r = await trendingPaged();
-          items = r.items;
-          next = r.next;
-          feedReserve.current = [];
-        } else {
-          const r = await searchPaged(feedQuery);
-          items = r.items;
-          chans = r.channels || [];
-          plays = r.playlists || [];
-          next = r.next;
-          feedReserve.current = [];
-        }
-        if (gen !== feedGen.current) return;
-        setFeed(items);
-        setChannels(chans);
-        setPlaylists(plays);
+        const searches = JSON.parse(localStorage.getItem("yt.searches") || "[]");
+        const getProgress = (): Record<string, number> => {
+          try {
+            return JSON.parse(localStorage.getItem("yt_progress_map") || "{}");
+          } catch {
+            return {};
+          }
+        };
 
-        feedNext.current = next;
-        setHasMore(feedKind === "home" ? feedReserve.current.length > 0 || !!next : !!next);
+        const r = await buildHomeFeed(subs, history, liked, {
+          progress: getProgress(),
+          searches,
+          dismissed: getDismissed(),
+        });
+
+        if (cancelled) return;
+
+        feedReserve.current = r.reserve || [];
+
+        const currentScroll = window.scrollY || document.documentElement.scrollTop;
+
+        type FeedPage = {
+          items: PipedVideo[];
+          next?: unknown;
+          channels?: unknown[];
+          playlists?: unknown[];
+        };
+        type InfiniteFeed = { pages: FeedPage[]; pageParams: unknown[] };
+
+        queryClient.setQueryData(feedQueryKey, (old: InfiniteFeed | undefined) => {
+          if (!old || !old.pages || old.pages.length === 0) return old;
+          const newPages = [...old.pages];
+          newPages[0] = {
+            ...newPages[0],
+            items: r.videos,
+            next: r.next,
+          };
+          return { ...old, pages: newPages };
+        });
+
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: currentScroll, behavior: "instant" });
+        });
+
+        // Async AI re-ranking on unseen items
+        if (r.videos && r.videos.length > 8) {
+          const profile = buildTasteProfile({
+            history,
+            progress: getProgress(),
+            likedIds: liked,
+            subs,
+            searches,
+          });
+          const reranked = await rerankUnseenWithAI(r, profile);
+
+          if (cancelled) return;
+
+          if (reranked && reranked.videos) {
+            feedReserve.current = reranked.reserve || [];
+            const scrollBeforeAI = window.scrollY || document.documentElement.scrollTop;
+
+            queryClient.setQueryData(feedQueryKey, (old: InfiniteFeed | undefined) => {
+              if (!old || !old.pages || old.pages.length === 0) return old;
+              const newPages = [...old.pages];
+              newPages[0] = {
+                ...newPages[0],
+                items: reranked.videos,
+              };
+              return { ...old, pages: newPages };
+            });
+
+            requestAnimationFrame(() => {
+              window.scrollTo({ top: scrollBeforeAI, behavior: "instant" });
+            });
+          }
+        }
       } catch {
-        if (gen === feedGen.current) setFeedErr(true);
+        // Fallback to initial trending on error
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFeedMode, feedKind, feedQuery, feedAttempt, signalsReady, history.length, subs.length]);
 
-  const loadMore = useCallback(async () => {
-    if (loadingMore) return;
-    const gen = feedGen.current;
+    return () => {
+      cancelled = true;
+    };
+  }, [isFeedMode, feedKind, signalsReady, feedQueryKey, queryClient, subs, history, liked]);
 
-    if (feedKind === "home") {
-      if (feedReserve.current.length > 0) {
-        const nextBatch = feedReserve.current.splice(0, 20);
-        setFeed((f) => {
-          const have = new Set((f || []).map((v) => v.url));
-          return [...(f || []), ...nextBatch.filter((v) => !have.has(v.url))];
-        });
-        setHasMore(feedReserve.current.length > 0 || !!feedNext.current);
-        return;
-      }
-      if (feedNext.current) {
-        setLoadingMore(true);
-        try {
-          const r = await trendingPaged(feedNext.current);
-          if (gen !== feedGen.current) return;
-          const ranked = rankIncoming(r.items);
-          setFeed((f) => {
-            const have = new Set((f || []).map((v) => v.url));
-            return [...(f || []), ...ranked.filter((v) => !have.has(v.url))];
-          });
-          feedNext.current = r.next;
-          setHasMore(feedReserve.current.length > 0 || !!r.next);
-        } catch {
-          if (gen === feedGen.current) setHasMore(false);
-        } finally {
-          if (gen === feedGen.current) setLoadingMore(false);
+  const feed = useMemo(() => {
+    if (!isFeedMode) return null;
+    if (feedKind === "home" && !signalsReady) return null;
+    if (!infiniteFeedData) return null;
+    const allItems: PipedVideo[] = [];
+    const seen = new Set<string>();
+    for (const page of infiniteFeedData.pages) {
+      for (const v of page.items || []) {
+        if (v?.url && !seen.has(v.url)) {
+          seen.add(v.url);
+          allItems.push(v);
         }
-        return;
       }
-      setHasMore(false);
-      return;
     }
+    return allItems;
+  }, [isFeedMode, feedKind, signalsReady, infiniteFeedData]);
 
-    if (!feedNext.current) return;
-    setLoadingMore(true);
-    try {
-      const r =
-        feedKind === "search"
-          ? await searchPaged(feedQuery, feedNext.current)
-          : await trendingPaged(feedNext.current);
-      if (gen !== feedGen.current) return;
-      setFeed((f) => {
-        const have = new Set((f || []).map((v) => v.url));
-        return [...(f || []), ...r.items.filter((v) => !have.has(v.url))];
-      });
-      feedNext.current = r.next;
-      setHasMore(!!r.next);
-    } catch {
-      if (gen === feedGen.current) setHasMore(false);
-    } finally {
-      if (gen === feedGen.current) setLoadingMore(false);
+  const channels = useMemo(() => {
+    return infiniteFeedData?.pages[0]?.channels || [];
+  }, [infiniteFeedData]);
+
+  const playlists = useMemo(() => {
+    return infiniteFeedData?.pages[0]?.playlists || [];
+  }, [infiniteFeedData]);
+
+  const loadingMore = isFetchingNextPage;
+  const hasMore = !!hasNextPage;
+
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
     }
-  }, [feedKind, feedQuery, loadingMore]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // infinite scroll: fetch the next page when the sentinel becomes visible
   useEffect(() => {
@@ -438,7 +575,7 @@ export default function App() {
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, isFeedMode, loadMore, feed]);
+  }, [hasMore, isFeedMode, loadMore]);
 
   const toggleLater = (id: string, video?: PipedVideo) => {
     if (video) {
@@ -576,29 +713,121 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
-  const openVideo = (v: PipedVideo, forceWatch = false) => {
-    const id = videoIdFromUrl(v.url);
-    if (!id) return;
+  const [topRecommendedVideo, setTopRecommendedVideo] = useState<PipedVideo | null>(null);
+  const [autoplayCountdown, setAutoplayCountdown] = useState<{
+    nextVideo: PipedVideo;
+    secondsLeft: number;
+    fromQueue: boolean;
+  } | null>(null);
+  const countdownTimerRef = useRef<number | null>(null);
 
-    if (!forceWatch && isShortsVideo(v)) {
-      const idx = shortsItems.findIndex((s) => videoIdFromUrl(s.url) === id);
-      if (idx !== -1) {
-        setShorts({ items: shortsItems, index: idx });
-      } else {
-        setShorts({ items: [v], index: 0 });
+  const openVideo = useCallback(
+    (v: PipedVideo, forceWatch = false) => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
       }
-      return;
-    }
+      setAutoplayCountdown(null);
 
-    setShorts(null);
-    appStore.setMiniplayer(null);
-    setRoute({ type: "watch", video: v });
+      const id = videoIdFromUrl(v.url);
+      if (!id) return;
 
-    if (id !== urlVideoId) {
-      void routerNav({ to: "/watch", search: { v: id } });
+      if (!forceWatch && isShortsVideo(v)) {
+        const idx = shortsItems.findIndex((s) => videoIdFromUrl(s.url) === id);
+        if (idx !== -1) {
+          setShorts({ items: shortsItems, index: idx });
+        } else {
+          setShorts({ items: [v], index: 0 });
+        }
+        return;
+      }
+
+      setShorts(null);
+      appStore.setMiniplayer(null);
+      setRoute({ type: "watch", video: v });
+
+      if (id !== urlVideoId) {
+        void routerNav({ to: "/watch", search: { v: id } });
+      }
+      window.scrollTo({ top: 0 });
+    },
+    [shortsItems, urlVideoId, routerNav],
+  );
+
+  const cancelAutoplay = () => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
     }
-    window.scrollTo({ top: 0 });
+    setAutoplayCountdown(null);
   };
+
+  const playAutoplayNow = () => {
+    if (!autoplayCountdown) return;
+    const { nextVideo, fromQueue } = autoplayCountdown;
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setAutoplayCountdown(null);
+    if (fromQueue) {
+      appStore.advanceQueue();
+    }
+    openVideo(nextVideo);
+  };
+
+  const handleVideoEnded = useCallback(() => {
+    const storeState = appStore.getSnapshot();
+    if (!storeState.autoplayNext) return;
+
+    let nextVid: PipedVideo | null = null;
+    let fromQueue = false;
+
+    if (
+      storeState.queue &&
+      storeState.queue.length > 0 &&
+      storeState.queueIndex + 1 < storeState.queue.length
+    ) {
+      nextVid = storeState.queue[storeState.queueIndex + 1];
+      fromQueue = true;
+    } else if (topRecommendedVideo) {
+      nextVid = topRecommendedVideo;
+      fromQueue = false;
+    }
+
+    if (!nextVid) return;
+
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+
+    setAutoplayCountdown({
+      nextVideo: nextVid,
+      secondsLeft: 5,
+      fromQueue,
+    });
+
+    countdownTimerRef.current = window.setInterval(() => {
+      setAutoplayCountdown((prev) => {
+        if (!prev) {
+          if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+          return null;
+        }
+        if (prev.secondsLeft <= 1) {
+          if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+          setTimeout(() => {
+            if (prev.fromQueue) {
+              appStore.advanceQueue();
+            }
+            openVideo(prev.nextVideo);
+          }, 50);
+          return null;
+        }
+        return { ...prev, secondsLeft: prev.secondsLeft - 1 };
+      });
+    }, 1000);
+  }, [topRecommendedVideo, openVideo]);
 
   // keep the in-app view in sync with the address bar (deep links, back/forward)
   useEffect(() => {
@@ -801,7 +1030,15 @@ export default function App() {
       };
     }
 
-    const unhidden = feed.filter((v) => !hidden.includes(videoIdFromUrl(v.url)));
+    const dismissed = getDismissed();
+    const unhidden = feed.filter((v) => {
+      const vid = videoIdFromUrl(v.url);
+      const chId = channelIdFromUrl(v.uploaderUrl || "");
+      if (hidden.includes(vid)) return false;
+      if (dismissed.videoIds.includes(vid)) return false;
+      if (chId && dismissed.channelIds.includes(chId)) return false;
+      return true;
+    });
 
     if (!isSearchActive) {
       return {
@@ -884,8 +1121,48 @@ export default function App() {
     shortsItems.length > 0;
   const inWatch = route.type === "watch";
 
+  const handleDismissVideo = async (videoId: string) => {
+    setHidden((h) => [...h, videoId]);
+    await dismissVideo(videoId);
+    notify(
+      {
+        message: isAr ? "تم إخفاء الفيديو" : "Video hidden",
+        actionLabel: isAr ? "تراجع" : "Undo",
+        onAction: async () => {
+          setHidden((h) => h.filter((x) => x !== videoId));
+          await undoDismiss(videoId);
+          setFeedAttempt((a) => a + 1);
+        },
+      },
+      6000,
+    );
+  };
+
+  const handleDismissChannel = async (channelId: string) => {
+    const videoIdsFromChannel = (feed || [])
+      .filter((v) => channelIdFromUrl(v.uploaderUrl || "") === channelId)
+      .map((v) => videoIdFromUrl(v.url))
+      .filter(Boolean);
+
+    setHidden((h) => [...h, ...videoIdsFromChannel]);
+    await dismissChannel(channelId);
+    notify(
+      {
+        message: isAr ? "عدم اقتراح القناة" : "Won't recommend channel",
+        actionLabel: isAr ? "تراجع" : "Undo",
+        onAction: async () => {
+          setHidden((h) => h.filter((x) => !videoIdsFromChannel.includes(x)));
+          await undoDismiss(channelId);
+          setFeedAttempt((a) => a + 1);
+        },
+      },
+      6000,
+    );
+  };
+
   const cardProps = (v: PipedVideo, i: number) => {
     const id = videoIdFromUrl(v.url);
+    const channelId = channelIdFromUrl(v.uploaderUrl || "");
     return {
       video: v,
       onOpen: openVideo,
@@ -894,7 +1171,8 @@ export default function App() {
       onChannel: openChannel,
       saved: watchLater.includes(id),
       onSaveLater: () => toggleLater(id, v),
-      onDismiss: (vid: string) => setHidden((h) => [...h, vid]),
+      onDismiss: (vid: string) => handleDismissVideo(vid),
+      onDismissChannel: channelId ? (chId: string) => handleDismissChannel(chId) : undefined,
       onAddToPlaylist: () => {
         setPlaylistTargetVideo(v);
         setPlaylistDialogOpen(true);
@@ -1101,6 +1379,7 @@ export default function App() {
             onToggleSub={(m) => doToggleSub(m)}
             onMinimize={minimizeVideo}
             startTime={appStore.getPlaybackTime(videoIdFromUrl(route.video.url))}
+            onTopRecommendedChange={setTopRecommendedVideo}
           />
         )}
 
@@ -1189,7 +1468,7 @@ export default function App() {
             {!isSearchActive && route.type === "home" && subs.length === 0 && <YouTubeSyncBanner />}
 
             {feedErr ? (
-              <ErrorState onRetry={() => setFeedAttempt((a) => a + 1)} />
+              <ErrorState onRetry={() => void refetchFeed()} />
             ) : feed === null ? (
               <SkeletonGrid />
             ) : route.type === "subs" && subs.length === 0 ? (
@@ -1473,14 +1752,71 @@ export default function App() {
               appStore.setPlaybackTime(activeVideoId, t);
               savePlaybackProgress(activeVideoId, t);
             }}
+            onEnded={handleVideoEnded}
           />
+
+          {autoplayCountdown && (
+            <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-4 text-white text-center animate-in fade-in duration-200 select-none">
+              <div className="text-xs font-bold uppercase tracking-wider text-yt-sub mb-1">
+                {isAr ? "الفيديو التالي خلال" : "Up Next in"}
+              </div>
+              <div className="text-4xl font-extrabold text-yt-blue font-mono mb-3">
+                {autoplayCountdown.secondsLeft}
+              </div>
+              <div className="flex items-center gap-3 max-w-sm w-full bg-yt-surface/80 p-2.5 rounded-xl border border-yt-border/50 text-start mb-4 shadow-lg">
+                <img
+                  src={
+                    autoplayCountdown.nextVideo.thumbnail ||
+                    `https://i.ytimg.com/vi/${videoIdFromUrl(autoplayCountdown.nextVideo.url)}/mqdefault.jpg`
+                  }
+                  alt={autoplayCountdown.nextVideo.title}
+                  className="w-20 aspect-video rounded object-cover shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold line-clamp-2 leading-snug">
+                    {autoplayCountdown.nextVideo.title}
+                  </p>
+                  <p className="text-[11px] text-yt-sub mt-0.5 truncate">
+                    {autoplayCountdown.nextVideo.uploaderName}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={cancelAutoplay}
+                  className="px-4 py-2 rounded-full bg-yt-surface hover:bg-yt-hover text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                >
+                  {isAr ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  onClick={playAutoplayNow}
+                  className="px-5 py-2 rounded-full bg-yt-blue text-black hover:bg-opacity-90 text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5 shadow-lg shadow-yt-blue/20 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>{isAr ? "تشغيل الآن" : "Play now"}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Floating Notification Toast */}
       {toast && (
-        <div className="fixed bottom-16 md:bottom-6 start-1/2 -translate-x-1/2 z-[70] bg-yt-raised border border-yt-border px-5 py-2.5 rounded-full shadow-2xl shadow-black text-sm font-medium flex items-center gap-2 animate-in fade-in slide-in-from-bottom-3 duration-200">
-          <span>{toast}</span>
+        <div className="fixed bottom-16 md:bottom-6 start-1/2 -translate-x-1/2 z-[70] bg-yt-raised border border-yt-border px-5 py-2.5 rounded-full shadow-2xl shadow-black text-sm font-medium flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <span>{typeof toast === "string" ? toast : toast.message}</span>
+          {typeof toast !== "string" && toast.actionLabel && toast.onAction && (
+            <button
+              onClick={() => {
+                toast.onAction?.();
+                setToast(null);
+                if (toastTimer.current) window.clearTimeout(toastTimer.current);
+              }}
+              className="text-yt-red hover:text-red-400 font-bold ms-2 focus:outline-none transition-colors"
+            >
+              {toast.actionLabel}
+            </button>
+          )}
         </div>
       )}
 

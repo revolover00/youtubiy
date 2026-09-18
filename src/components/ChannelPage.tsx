@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { BadgeCheck, Bell, Loader2, Search, Share2 } from "lucide-react";
 import { getChannel, browsePaged } from "../lib/api";
 import { fmtViews, videoIdFromUrl } from "../lib/format";
@@ -47,10 +48,6 @@ export default function ChannelPage({
     if (!current) setTabId("home");
   }, [TABS, tabId]);
 
-  const [data, setData] = useState<ChannelData | null>(null);
-  const [error, setError] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-
   // Pagination state
   const [allVideos, setAllVideos] = useState<PipedVideo[]>([]);
   const [nextVideos, setNextVideos] = useState<string | null>(null);
@@ -59,30 +56,31 @@ export default function ChannelPage({
   const [loadingMore, setLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let alive = true;
-    setData(null);
-    setError(false);
-    setAllVideos([]);
-    setNextVideos(null);
-    setAllShorts([]);
-    setNextShorts(null);
+  const {
+    data,
+    isPending: loading,
+    isError: error,
+    refetch,
+  } = useQuery({
+    queryKey: ["channel", channelId],
+    queryFn: () => getChannel(channelId),
+    placeholderData: keepPreviousData,
+    enabled: !!channelId,
+  });
 
-    getChannel(channelId)
-      .then((d) => {
-        if (alive) {
-          setData(d);
-          setAllVideos(d.relatedStreams || []);
-          setNextVideos(d.nextVideos || null);
-          setAllShorts(d.shorts || []);
-          setNextShorts(d.nextShorts || null);
-        }
-      })
-      .catch(() => alive && setError(true));
-    return () => {
-      alive = false;
-    };
-  }, [channelId, attempt]);
+  useEffect(() => {
+    if (data) {
+      setAllVideos(data.relatedStreams || []);
+      setNextVideos(data.nextVideos || null);
+      setAllShorts(data.shorts || []);
+      setNextShorts(data.nextShorts || null);
+    } else {
+      setAllVideos([]);
+      setNextVideos(null);
+      setAllShorts([]);
+      setNextShorts(null);
+    }
+  }, [data]);
 
   const loadMore = useCallback(async () => {
     const token = tabId === "shorts" ? nextShorts : nextVideos;
@@ -130,8 +128,9 @@ export default function ChannelPage({
     return () => io.disconnect();
   }, [tabId, nextVideos, nextShorts, loadMore]);
 
-  if (error)
-    return <ErrorState onRetry={() => setAttempt((a) => a + 1)} message={t("channelLoadError")} />;
+  if (error) {
+    return <ErrorState onRetry={() => void refetch()} message={t("channelLoadError")} />;
+  }
   if (!data)
     return (
       <div className="max-w-[1280px] mx-auto px-3 sm:px-6 pt-4">
