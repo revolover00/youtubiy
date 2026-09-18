@@ -9,6 +9,7 @@ import {
   Play,
   Download,
   Smartphone,
+  ShieldCheck,
 } from "lucide-react";
 import { useLanguage, type Language } from "../lib/i18n";
 import { clearHistory, setBackgroundPlay as persistBackgroundPlay } from "../lib/store";
@@ -19,10 +20,17 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onHistoryCleared?: () => void;
+  onOpenPolicies?: () => void;
   notify: (msg: string) => void;
 }
 
-export default function SettingsDialog({ open, onClose, onHistoryCleared, notify }: Props) {
+export default function SettingsDialog({
+  open,
+  onClose,
+  onHistoryCleared,
+  onOpenPolicies,
+  notify,
+}: Props) {
   const { lang, setLang, t, dir, isAr } = useLanguage();
   const [confirmClear, setConfirmClear] = useState(false);
   const { backgroundPlay } = useAppStore();
@@ -248,6 +256,35 @@ export default function SettingsDialog({ open, onClose, onHistoryCleared, notify
                 <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
               </button>
             )}
+          </div>
+
+          <hr className="border-yt-border" />
+
+          {/* Policies & Copyrights */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5 text-base font-bold text-yt-text">
+              <ShieldCheck className="w-5 h-5 text-emerald-400" />
+              <span>{isAr ? "الحقوق والسياسات" : "Legal & Policies"}</span>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                onOpenPolicies?.();
+              }}
+              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-yt-bg border border-yt-border hover:bg-yt-surface transition-colors text-start"
+            >
+              <div>
+                <span className="text-sm font-medium text-white block">
+                  {isAr ? "شروط الخدمة، الخصوصية وحقوق الملكية" : "Terms, Privacy & Content Rights"}
+                </span>
+                <span className="text-xs text-yt-sub">
+                  {isAr
+                    ? "الاطلاع على سياسات التطبيق، حقوق المحتوى وGoogle API"
+                    : "View terms of service, privacy notice and Google API policy"}
+                </span>
+              </div>
+              <ShieldCheck className="w-4 h-4 text-yt-sub shrink-0" />
+            </button>
           </div>
         </div>
 

@@ -34,7 +34,8 @@ export type RouteState =
   | { type: "channel"; id: string }
   | { type: "playlist"; id: string }
   | { type: "subs" }
-  | { type: "library"; key: LibraryKey };
+  | { type: "library"; key: LibraryKey }
+  | { type: "policies" };
 
 interface AppStoreState {
   searchQ: string;

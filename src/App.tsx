@@ -22,6 +22,7 @@ import LibraryPage, { type LibraryKey } from "./components/LibraryPage";
 import PlaylistPage from "./components/PlaylistPage";
 import PlaylistDialog from "./components/PlaylistDialog";
 import SettingsDialog from "./components/SettingsDialog";
+import PoliciesPage from "./components/PoliciesPage";
 import { YouTubeImportModal } from "./components/YouTubeImportModal";
 import { YouTubeSyncBanner } from "./components/YouTubeSyncBanner";
 import YouTubePlayer from "./components/YouTubePlayer";
@@ -234,6 +235,8 @@ export default function App() {
       title = t("subscriptions");
     } else if (route.type === "library") {
       title = route.key;
+    } else if (route.type === "policies") {
+      title = isAr ? "الحقوق والسياسات" : "Terms & Policies";
     }
 
     document.title = title === brand ? brand : `${title} - ${brand}`;
@@ -266,6 +269,8 @@ export default function App() {
     } else if (route.type === "library") {
       if (pathname !== "/library" || urlSearchK !== route.key)
         void routerNav({ to: "/library", search: { k: route.key } });
+    } else if (route.type === "policies") {
+      if (pathname !== "/policies") void routerNav({ to: "/policies" });
     }
   }, [
     route,
@@ -304,6 +309,8 @@ export default function App() {
         setRoute({ type: "playlist", id: urlSearchId });
     } else if (pathname === "/search") {
       if (urlSearchQ && urlSearchQ !== searchQ) setSearchQ(urlSearchQ);
+    } else if (pathname === "/policies") {
+      if (route.type !== "policies") setRoute({ type: "policies" });
     }
   }, [
     pathname,
@@ -729,6 +736,16 @@ export default function App() {
       void routerNav({ to: "/subscriptions" });
       setRoute({ type: "subs" });
       window.scrollTo({ top: 0 });
+    } else if (
+      label === "policies" ||
+      label === "الحقوق والسياسات" ||
+      label === "Terms & Policies" ||
+      label === t("terms")
+    ) {
+      setSearchQ("");
+      void routerNav({ to: "/policies" });
+      setRoute({ type: "policies" });
+      window.scrollTo({ top: 0 });
     } else if ((LIBRARY_KEYS as string[]).includes(label)) {
       setSearchQ("");
       void routerNav({ to: "/library", search: { k: label } });
@@ -1126,6 +1143,8 @@ export default function App() {
           />
         )}
 
+        {route.type === "policies" && <PoliciesPage onBackToHome={goHome} />}
+
         {isFeedMode && (
           <div className="px-3 sm:px-6">
             {/* Conditional Chips Bar: When search is active, show the 7 requested search filter chips! */}
@@ -1359,6 +1378,7 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         notify={notify}
+        onOpenPolicies={() => navigate("policies")}
         onHistoryCleared={() => {
           setHistory([]);
           clearHistory();

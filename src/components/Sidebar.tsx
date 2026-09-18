@@ -16,6 +16,7 @@ import {
   Flag,
   HelpCircle,
   Globe,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { ShortsIcon, SubscriptionsIcon, LogoIcon } from "./icons";
@@ -204,14 +205,30 @@ function FullContent({
           label={`${t("language")}: ${t("languageName")}`}
           onClick={onOpenSettings}
         />
+        <Item
+          icon={ShieldCheck}
+          label={isAr ? "الحقوق والسياسات" : "Terms & Policies"}
+          active={active === "policies"}
+          onClick={() => onNavigate("policies")}
+        />
         <Item icon={Flag} label={t("report")} onClick={() => onNavigate(t("report"))} />
         <Item icon={HelpCircle} label={t("help")} onClick={() => onNavigate(t("help"))} />
       </div>
 
       <div className="px-3 pt-4 text-xs text-yt-sub leading-relaxed">
-        <p className="font-bold text-[13px] text-yt-text/80 mb-2">{t("about")}</p>
-        <p>{t("terms")}</p>
-        <p>{t("howWorks")}</p>
+        <button
+          onClick={() => onNavigate("policies")}
+          className="font-bold text-[13px] text-yt-text/80 hover:text-white mb-2 text-start block transition-colors"
+        >
+          {isAr ? "الحقوق والسياسات والأمان" : "Policies, Terms & Safety"}
+        </button>
+        <button
+          onClick={() => onNavigate("policies")}
+          className="text-start block hover:underline text-yt-sub hover:text-yt-text transition-colors"
+        >
+          {t("terms")}
+        </button>
+        <p className="mt-1">{t("howWorks")}</p>
         <p className="mt-3">{t("copyright")}</p>
       </div>
     </div>
