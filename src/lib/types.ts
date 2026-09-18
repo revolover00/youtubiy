@@ -146,3 +146,10 @@ export interface AppNotification {
   created_at: string;
   read: boolean;
 }
+
+export interface AppUser {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+}

@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import {
   auth,
   getCachedAccessToken,
+  getCachedGoogleUser,
   isPopupClosedError,
   loginWithGoogle,
   logoutUser,
@@ -10,13 +11,14 @@ import {
 } from "./firebase";
 import { syncUserProfile } from "./store";
 import { importYouTubeUserData, type YouTubeImportResult } from "./youtubeApi";
+import type { AppUser } from "./types";
 
 interface AuthContextValue {
-  user: User | null;
+  user: AppUser | null;
   loading: boolean;
   importingYouTube: boolean;
   lastImportResult: YouTubeImportResult | null;
-  signIn: () => Promise<User | null>;
+  signIn: () => Promise<AppUser | null>;
   signOut: () => Promise<void>;
   syncYouTubeData: () => Promise<YouTubeImportResult | null>;
 }
@@ -32,22 +34,43 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [importingYouTube, setImportingYouTube] = useState(false);
   const [lastImportResult, setLastImportResult] = useState<YouTubeImportResult | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
+    // Check if we already have a cached Google Cloud Console user in session
+    const cached = getCachedGoogleUser();
+    if (cached) {
+      setUser(cached);
       setLoading(false);
+    }
+
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        const mappedUser: AppUser = {
+          uid: currentUser.uid,
+          email: currentUser.email,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL,
+        };
+        setUser(mappedUser);
         try {
-          await syncUserProfile(currentUser);
+          await syncUserProfile(mappedUser);
         } catch (err) {
           console.warn("User profile sync notice:", err);
         }
+      } else {
+        // If not signed into Firebase, keep GSI cached user if available
+        const currentGsi = getCachedGoogleUser();
+        if (currentGsi) {
+          setUser(currentGsi);
+        } else {
+          setUser(null);
+        }
       }
+      setLoading(false);
     });
 
     return () => unsub();
@@ -71,10 +94,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signIn = async (): Promise<User | null> => {
+  const signIn = async (): Promise<AppUser | null> => {
     try {
       const res = await loginWithGoogle();
       if (res?.user) {
+        setUser(res.user);
         try {
           await syncUserProfile(res.user);
         } catch (err) {
@@ -119,6 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       await logoutUser();
+      setUser(null);
       setLastImportResult(null);
     } catch (err) {
       console.warn("Sign out ended:", err);

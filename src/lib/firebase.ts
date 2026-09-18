@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, type User } from "firebase/auth";
 import { doc, getDocFromServer, getFirestore } from "firebase/firestore";
+import { requestGoogleAccessToken, fetchGoogleUserProfile, type GoogleUserProfile } from "./gsi";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDQAG0GLQq6KUph_RMLBJFbRNWiMJOIlOk",
@@ -9,7 +10,7 @@ const firebaseConfig = {
   storageBucket: "gen-lang-client-0814697034.firebasestorage.app",
   messagingSenderId: "998894461308",
   appId: "1:998894461308:web:e19d6cb430ec54480804f9",
-  clientId: "998894461308-raq4v8k54mdcjkdnfjmf29vhvo5u2q73.apps.googleusercontent.com",
+  clientId: "880349982881-8naia73nime31f07q99j6e2m55gimlac.apps.googleusercontent.com",
 };
 
 export const app = initializeApp(firebaseConfig);
@@ -22,6 +23,7 @@ export const YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.readonly
 
 // In-memory access token cache (Workspace / Google integration guidelines: never store in localStorage)
 let cachedAccessToken: string | null = null;
+let cachedGoogleUser: GoogleUserProfile | null = null;
 
 export function getCachedAccessToken(): string | null {
   return cachedAccessToken;
@@ -29,6 +31,14 @@ export function getCachedAccessToken(): string | null {
 
 export function setCachedAccessToken(token: string | null): void {
   cachedAccessToken = token;
+}
+
+export function getCachedGoogleUser(): GoogleUserProfile | null {
+  return cachedGoogleUser;
+}
+
+export function setCachedGoogleUser(user: GoogleUserProfile | null): void {
+  cachedGoogleUser = user;
 }
 
 export enum OperationType {
@@ -115,16 +125,43 @@ if (typeof window !== "undefined") {
 }
 
 export async function loginWithGoogle(): Promise<{
-  user: User;
+  user: {
+    uid: string;
+    email?: string | null;
+    displayName?: string | null;
+    photoURL?: string | null;
+  };
   accessToken: string | null;
 } | null> {
+  // First attempt: Direct Google Cloud Console OAuth 2.0 flow via Google Identity Services
+  try {
+    const token = await requestGoogleAccessToken(false);
+    if (token) {
+      cachedAccessToken = token;
+      const profile = await fetchGoogleUserProfile(token);
+      cachedGoogleUser = profile;
+      return { user: profile, accessToken: token };
+    }
+  } catch (gsiError) {
+    console.warn("Direct Google Cloud OAuth attempt:", gsiError);
+  }
+
+  // Second attempt / fallback: Firebase Google Auth Provider popup
   try {
     const provider = new GoogleAuthProvider();
     provider.addScope("https://www.googleapis.com/auth/youtube.readonly");
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     cachedAccessToken = credential?.accessToken || null;
-    return { user: result.user, accessToken: cachedAccessToken };
+    return {
+      user: {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        photoURL: result.user.photoURL,
+      },
+      accessToken: cachedAccessToken,
+    };
   } catch (error) {
     if (isPopupClosedError(error)) {
       return null;
@@ -135,6 +172,18 @@ export async function loginWithGoogle(): Promise<{
 }
 
 export async function requestYouTubeAccessToken(): Promise<string | null> {
+  // First attempt: Direct Google Cloud Console OAuth via Google Identity Services
+  try {
+    const token = await requestGoogleAccessToken(true);
+    if (token) {
+      cachedAccessToken = token;
+      return token;
+    }
+  } catch (gsiError) {
+    console.warn("Direct Google Cloud token request attempt:", gsiError);
+  }
+
+  // Second attempt: Firebase Auth Popup
   const ytProvider = new GoogleAuthProvider();
   ytProvider.addScope("https://www.googleapis.com/auth/youtube.readonly");
   try {
@@ -154,9 +203,10 @@ export async function requestYouTubeAccessToken(): Promise<string | null> {
 export async function logoutUser(): Promise<void> {
   try {
     await signOut(auth);
-    cachedAccessToken = null;
   } catch (error) {
-    console.warn("Failed to sign out:", error);
-    throw error;
+    console.warn("Notice during sign out:", error);
+  } finally {
+    cachedAccessToken = null;
+    cachedGoogleUser = null;
   }
 }
