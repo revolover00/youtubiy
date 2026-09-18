@@ -16,7 +16,10 @@ import {
   ChevronUp,
   Trash2,
   Play,
+  Square,
+  Keyboard,
 } from "lucide-react";
+import KeyboardShortcutsModal from "./KeyboardShortcutsModal";
 import { getCommentsPage, getStreams, searchPaged } from "../lib/api";
 import { appStore, useAppStore } from "../lib/appStore";
 import {
@@ -292,6 +295,32 @@ export default function Watch({
   const [showInlineComments, setShowInlineComments] = useState(false);
   const [chaptersCollapsed, setChaptersCollapsed] = useState(false);
 
+  // Theater Mode State (persisted in localStorage key 'yt.theater')
+  const [theater, setTheater] = useState(() => {
+    try {
+      return localStorage.getItem("yt.theater") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleTheater = useCallback(() => {
+    setTheater((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("yt.theater", String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  // Player state for keyboard shortcuts
+  const [isCurrentlyPlaying, setIsCurrentlyPlaying] = useState(true);
+  const [currentVolume, setCurrentVolume] = useState(100);
+  const [isMuted, setIsMuted] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(video.duration || 0);
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
   // Comments state & pagination
   const [commentsList, setCommentsList] = useState<PipedComment[]>([]);
   const [commentsCont, setCommentsCont] = useState<string | undefined>(undefined);
@@ -510,22 +539,219 @@ export default function Watch({
     }
   }, [id, data, video.duration]);
 
-  // Keyboard shortcut 'i' for miniplayer
+  // Sync player status events from YouTube iframe
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (
-        (e.target as HTMLElement).tagName === "INPUT" ||
-        (e.target as HTMLElement).tagName === "TEXTAREA"
-      )
-        return;
-      if (e.key === "i" || e.key === "I") {
-        e.preventDefault();
-        onMinimize?.();
+    const handlePlayerInfo = (e: Event) => {
+      const info = (e as CustomEvent).detail;
+      if (!info) return;
+      if (typeof info.playerState === "number") {
+        setIsCurrentlyPlaying(info.playerState === 1);
+      }
+      if (typeof info.volume === "number") {
+        setCurrentVolume(info.volume);
+      }
+      if (typeof info.muted === "boolean") {
+        setIsMuted(info.muted);
+      }
+      if (typeof info.duration === "number" && info.duration > 0) {
+        setVideoDuration(info.duration);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onMinimize]);
+    window.addEventListener("yt:player-info", handlePlayerInfo);
+    return () => window.removeEventListener("yt:player-info", handlePlayerInfo);
+  }, []);
+
+  // Keyboard Shortcuts Handler (YouTube style)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.isContentEditable ||
+          activeEl.closest("input, textarea, [contenteditable='true']"))
+      ) {
+        return;
+      }
+
+      const key = e.key;
+
+      // Shift + N -> Next video
+      if (e.shiftKey && (key === "N" || key === "n")) {
+        e.preventDefault();
+        const storeState = appStore.getSnapshot();
+        const q = storeState.queue;
+        const qIdx = storeState.queueIndex;
+        if (q && q.length > 0 && qIdx + 1 < q.length) {
+          appStore.advanceQueue();
+          onOpen?.(q[qIdx + 1]);
+        } else {
+          const iframe = document.querySelector("#persistent-player iframe") as HTMLIFrameElement;
+          iframe?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "nextVideo", args: [] }),
+            "*",
+          );
+        }
+        return;
+      }
+
+      // '?' -> Open keyboard shortcuts modal
+      if (key === "?" || (e.shiftKey && key === "/")) {
+        e.preventDefault();
+        setShowShortcutsModal((prev) => !prev);
+        return;
+      }
+
+      // Space or 'k' / 'K' -> Play / Pause
+      if (key === " " || key === "k" || key === "K") {
+        e.preventDefault();
+        const func = isCurrentlyPlaying ? "pauseVideo" : "playVideo";
+        const iframe = document.querySelector("#persistent-player iframe") as HTMLIFrameElement;
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: "command", func, args: [] }),
+          "*",
+        );
+        setIsCurrentlyPlaying((prev) => !prev);
+        return;
+      }
+
+      // 'j' / 'J' -> Rewind 10s
+      if (key === "j" || key === "J") {
+        e.preventDefault();
+        seekTo(Math.max(0, currentTime - 10));
+        return;
+      }
+
+      // 'l' / 'L' -> Fast-forward 10s
+      if (key === "l" || key === "L") {
+        e.preventDefault();
+        const dur = videoDuration || data?.duration || 0;
+        seekTo(dur > 0 ? Math.min(dur, currentTime + 10) : currentTime + 10);
+        return;
+      }
+
+      // ArrowLeft -> Seek backward 5s
+      if (key === "ArrowLeft") {
+        e.preventDefault();
+        seekTo(Math.max(0, currentTime - 5));
+        return;
+      }
+
+      // ArrowRight -> Seek forward 5s
+      if (key === "ArrowRight") {
+        e.preventDefault();
+        const dur = videoDuration || data?.duration || 0;
+        seekTo(dur > 0 ? Math.min(dur, currentTime + 5) : currentTime + 5);
+        return;
+      }
+
+      // ArrowUp -> Volume up 5%
+      if (key === "ArrowUp") {
+        e.preventDefault();
+        const nextVol = Math.min(100, currentVolume + 5);
+        setCurrentVolume(nextVol);
+        const iframe = document.querySelector("#persistent-player iframe") as HTMLIFrameElement;
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: "command", func: "setVolume", args: [nextVol] }),
+          "*",
+        );
+        if (isMuted && nextVol > 0) {
+          setIsMuted(false);
+          iframe?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "unMute", args: [] }),
+            "*",
+          );
+        }
+        return;
+      }
+
+      // ArrowDown -> Volume down 5%
+      if (key === "ArrowDown") {
+        e.preventDefault();
+        const nextVol = Math.max(0, currentVolume - 5);
+        setCurrentVolume(nextVol);
+        const iframe = document.querySelector("#persistent-player iframe") as HTMLIFrameElement;
+        iframe?.contentWindow?.postMessage(
+          JSON.stringify({ event: "command", func: "setVolume", args: [nextVol] }),
+          "*",
+        );
+        return;
+      }
+
+      // 'm' / 'M' -> Toggle mute
+      if (key === "m" || key === "M") {
+        e.preventDefault();
+        const iframe = document.querySelector("#persistent-player iframe") as HTMLIFrameElement;
+        if (isMuted) {
+          setIsMuted(false);
+          iframe?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "unMute", args: [] }),
+            "*",
+          );
+        } else {
+          setIsMuted(true);
+          iframe?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "mute", args: [] }),
+            "*",
+          );
+        }
+        return;
+      }
+
+      // 'f' / 'F' -> Fullscreen
+      if (key === "f" || key === "F") {
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          void document.exitFullscreen();
+        } else {
+          const playerSlot = document.querySelector("#persistent-player") || playerContainerRef.current;
+          if (playerSlot) {
+            void playerSlot.requestFullscreen();
+          }
+        }
+        return;
+      }
+
+      // 't' / 'T' -> Toggle Theater mode
+      if (key === "t" || key === "T") {
+        e.preventDefault();
+        toggleTheater();
+        return;
+      }
+
+      // 'i' / 'I' -> Miniplayer
+      if (key === "i" || key === "I") {
+        e.preventDefault();
+        onMinimize?.();
+        return;
+      }
+
+      // Numbers 0-9 -> Jump to percentage
+      if (/^[0-9]$/.test(key)) {
+        e.preventDefault();
+        const num = parseInt(key, 10);
+        const dur = videoDuration || data?.duration || 0;
+        if (dur > 0) {
+          seekTo((num / 10) * dur);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    currentTime,
+    currentVolume,
+    isMuted,
+    isCurrentlyPlaying,
+    videoDuration,
+    data?.duration,
+    onOpen,
+    onMinimize,
+    toggleTheater,
+  ]);
 
   // Reset mobile comments drawer when video changes
   useEffect(() => {
@@ -684,6 +910,28 @@ export default function Watch({
             >
               <ListVideo className="w-5 h-5" />
               <span className="hidden sm:inline">{t("save")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={toggleTheater}
+              className={`flex items-center gap-2 h-9 px-3.5 rounded-full text-sm font-medium transition-colors ${
+                theater
+                  ? "bg-yt-blue text-black font-bold shadow-xs"
+                  : "bg-yt-surface hover:bg-yt-hover text-yt-text"
+              }`}
+              title={isAr ? "وضع المسرح (t)" : "Theater mode (t)"}
+            >
+              <Square className="w-5 h-5" />
+              <span className="hidden sm:inline">{isAr ? "وضع المسرح" : "Theater"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowShortcutsModal(true)}
+              className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-yt-surface hover:bg-yt-hover text-sm font-medium text-yt-text transition-colors"
+              title={isAr ? "اختصارات لوحة المفاتيح (?)" : "Keyboard shortcuts (?)"}
+            >
+              <Keyboard className="w-5 h-5" />
+              <span className="hidden sm:inline">{isAr ? "الاختصارات" : "Shortcuts"}</span>
             </button>
             {onMinimize && (
               <button

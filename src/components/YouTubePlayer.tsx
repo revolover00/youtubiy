@@ -60,6 +60,7 @@ export default function YouTubePlayer({
           if (info.playerState === 0) {
             onEnded?.();
           }
+          window.dispatchEvent(new CustomEvent("yt:player-info", { detail: info }));
         } else if (data.event === "onStateChange") {
           if (data.info === 0 || data.data === 0 || data.playerState === 0) {
             onEnded?.();
