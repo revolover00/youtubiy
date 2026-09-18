@@ -4,8 +4,16 @@
 //     nitro (build-only using cloudflare as a default target), VITE_* env injection, @ path alias,
 //     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
+import fs from "node:fs";
+import path from "node:path";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { VitePWA } from "vite-plugin-pwa";
+
+const isVercel = Boolean(
+  process.env.VERCEL || process.env.NOW_BUILDER || process.env.NITRO_PRESET === "vercel",
+);
+
+const pwaOutDir = isVercel ? ".vercel/output/static" : ".output/public";
 
 export default defineConfig({
   tanstackStart: {
@@ -15,11 +23,21 @@ export default defineConfig({
   },
   vite: {
     plugins: [
+      {
+        name: "ensure-pwa-outdir",
+        buildStart() {
+          try {
+            fs.mkdirSync(path.resolve(process.cwd(), pwaOutDir), { recursive: true });
+          } catch {
+            // ignore if directory creation fails or exists
+          }
+        },
+      },
       VitePWA({
-        outDir: ".output/public",
+        outDir: pwaOutDir,
         selfDestroying: true,
         registerType: "autoUpdate",
-        includeAssets: ["favicon.svg", "robots.txt"],
+        includeAssets: ["favicon.svg", "robots.txt", "sw.js"],
         workbox: {
           navigateFallback: null,
           runtimeCaching: [
@@ -66,6 +84,26 @@ export default defineConfig({
           ],
         },
       }),
+      {
+        name: "sync-pwa-sw",
+        closeBundle() {
+          const swFile = path.resolve(process.cwd(), pwaOutDir, "sw.js");
+          if (fs.existsSync(swFile)) {
+            const targets = [
+              path.resolve(process.cwd(), ".vercel/output/static/sw.js"),
+              path.resolve(process.cwd(), ".output/public/sw.js"),
+            ];
+            for (const target of targets) {
+              try {
+                fs.mkdirSync(path.dirname(target), { recursive: true });
+                fs.copyFileSync(swFile, target);
+              } catch {
+                // ignore
+              }
+            }
+          }
+        },
+      },
     ],
     server: {
       host: "0.0.0.0",

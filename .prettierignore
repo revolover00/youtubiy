@@ -1,7 +1,9 @@
 node_modules
 dist
 .output
+.vercel
 .vinxi
+public/sw.js
 pnpm-lock.yaml
 package-lock.json
 bun.lock
