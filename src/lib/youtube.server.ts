@@ -25,6 +25,73 @@ const CLIENT = {
   gl: "EG",
 };
 
+const cache = new Map<string, { at: number; data: unknown; inflight?: Promise<unknown> }>();
+
+async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const entry = cache.get(key);
+
+  if (entry) {
+    const age = now - entry.at;
+    if (age < ttlMs) {
+      return entry.data as T;
+    }
+    if (age < ttlMs * 4) {
+      // stale-while-revalidate: return stale data immediately, background refresh
+      if (!entry.inflight) {
+        entry.inflight = fn()
+          .then((fresh) => {
+            entry.at = Date.now();
+            entry.data = fresh;
+            return fresh;
+          })
+          .catch((err) => {
+            console.warn(`Background revalidation failed for ${key}:`, err);
+            return entry.data;
+          })
+          .finally(() => {
+            entry.inflight = undefined;
+          });
+      }
+      return entry.data as T;
+    }
+    // Expired beyond ttlMs * 4: if inflight exists, wait for it
+    if (entry.inflight) {
+      return (await entry.inflight) as T;
+    }
+  }
+
+  // Deduplicate inflight requests for the same key
+  const placeholder: { at: number; data: unknown; inflight?: Promise<unknown> } = entry || {
+    at: 0,
+    data: undefined,
+  };
+  const promise = (async () => {
+    const data = await fn();
+    placeholder.at = Date.now();
+    placeholder.data = data;
+    return data;
+  })();
+
+  placeholder.inflight = promise;
+  cache.set(key, placeholder);
+
+  // Evict oldest entries if map exceeds 500 entries
+  if (cache.size > 500) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) {
+      cache.delete(oldestKey);
+    }
+  }
+
+  try {
+    const result = await promise;
+    return result;
+  } finally {
+    placeholder.inflight = undefined;
+  }
+}
+
 export async function innertube<T = Json>(
   endpoint: "search" | "browse" | "next" | "player",
   body: Record<string, unknown>,
@@ -434,7 +501,10 @@ function continuationToken(payload: Json): string | null {
 }
 
 export async function search(query: string, params = SEARCH_VIDEOS): Promise<PipedVideo[]> {
-  return (await searchPage(query, params)).items;
+  const key = `search:${JSON.stringify([query, params])}`;
+  return cached(key, 10 * 60 * 1000, async () => {
+    return (await searchPage(query, params)).items;
+  });
 }
 
 /**
@@ -447,40 +517,47 @@ export async function searchPage(
   params = "",
   continuation?: string | null,
 ): Promise<Page> {
-  const data = await innertube(
-    "search",
-    continuation ? { continuation } : { query, ...(params ? { params } : {}) },
-  );
-  return {
-    items: extractVideos(data),
-    continuation: continuationToken(data),
-    channels: extractChannels(data),
-    playlists: extractPlaylists(data),
-  };
+  const key = `searchPage:${JSON.stringify([query, params, continuation ?? null])}`;
+  return cached(key, 10 * 60 * 1000, async () => {
+    const data = await innertube(
+      "search",
+      continuation ? { continuation } : { query, ...(params ? { params } : {}) },
+    );
+    return {
+      items: extractVideos(data),
+      continuation: continuationToken(data),
+      channels: extractChannels(data),
+      playlists: extractPlaylists(data),
+    };
+  });
 }
 
 /** All videos of a playlist. */
 export async function playlist(id: string): Promise<PlaylistData> {
-  const browseId = id.startsWith("VL") ? id : `VL${id}`;
-  const data = await innertube("browse", { browseId });
-  const header =
-    collect(data, "playlistHeaderRenderer")[0] ?? collect(data, "pageHeaderViewModel")[0] ?? {};
-  const meta = collect(data, "microformatDataRenderer")[0] ?? {};
-  const videos = extractVideos(data);
-  const title =
-    text(header.title) ||
-    text(collect(header, "dynamicTextViewModel")[0]?.text) ||
-    meta.title ||
-    "قائمة تشغيل";
-  return {
-    id: browseId.replace(/^VL/, ""),
-    title,
-    thumbnail: https(collect(header, "thumbnails")[0]?.at?.(-1)?.url) || videos[0]?.thumbnail || "",
-    videoCount: parseCount(text(header.numVideosText)) || videos.length,
-    uploaderName: text(header.ownerText) || text(collect(header, "ownerText")[0]),
-    description: meta.description ?? text(header.descriptionText),
-    videos,
-  };
+  const key = `playlist:${id}`;
+  return cached(key, 30 * 60 * 1000, async () => {
+    const browseId = id.startsWith("VL") ? id : `VL${id}`;
+    const data = await innertube("browse", { browseId });
+    const header =
+      collect(data, "playlistHeaderRenderer")[0] ?? collect(data, "pageHeaderViewModel")[0] ?? {};
+    const meta = collect(data, "microformatDataRenderer")[0] ?? {};
+    const videos = extractVideos(data);
+    const title =
+      text(header.title) ||
+      text(collect(header, "dynamicTextViewModel")[0]?.text) ||
+      meta.title ||
+      "قائمة تشغيل";
+    return {
+      id: browseId.replace(/^VL/, ""),
+      title,
+      thumbnail:
+        https(collect(header, "thumbnails")[0]?.at?.(-1)?.url) || videos[0]?.thumbnail || "",
+      videoCount: parseCount(text(header.numVideosText)) || videos.length,
+      uploaderName: text(header.ownerText) || text(collect(header, "ownerText")[0]),
+      description: meta.description ?? text(header.descriptionText),
+      videos,
+    };
+  });
 }
 
 const TRENDING_QUERIES = ["مصر", "الأكثر مشاهدة", "trailer", "music"];
@@ -512,46 +589,55 @@ function interleave(lists: PipedVideo[][]): PipedVideo[] {
  * `cursors` (from a previous page) fetches the next page of every source.
  */
 export async function trendingPage(cursors?: (string | null)[]): Promise<TrendingPage> {
-  const batches = await Promise.allSettled(
-    TRENDING_QUERIES.map((q, i) => {
-      if (cursors) {
-        const c = cursors[i];
-        return c
-          ? searchPage(q, SEARCH_HOT, c)
-          : Promise.resolve<Page>({ items: [], continuation: null, channels: [], playlists: [] });
-      }
-      return searchPage(q, SEARCH_HOT);
-    }),
-  );
-  const pages = batches.map((b) =>
-    b.status === "fulfilled"
-      ? b.value
-      : ({ items: [], continuation: null, channels: [], playlists: [] } as Page),
-  );
-  const items = interleave(pages.map((p) => p.items));
-  if (!items.length && !cursors) throw new Error("trending unavailable");
-  return { items, cursors: pages.map((p) => p.continuation) };
+  const key = `trendingPage:${JSON.stringify(cursors ?? null)}`;
+  return cached(key, 10 * 60 * 1000, async () => {
+    const batches = await Promise.allSettled(
+      TRENDING_QUERIES.map((q, i) => {
+        if (cursors) {
+          const c = cursors[i];
+          return c
+            ? searchPage(q, SEARCH_HOT, c)
+            : Promise.resolve<Page>({ items: [], continuation: null, channels: [], playlists: [] });
+        }
+        return searchPage(q, SEARCH_HOT);
+      }),
+    );
+    const pages = batches.map((b) =>
+      b.status === "fulfilled"
+        ? b.value
+        : ({ items: [], continuation: null, channels: [], playlists: [] } as Page),
+    );
+    const items = interleave(pages.map((p) => p.items));
+    if (!items.length && !cursors) throw new Error("trending unavailable");
+    return { items, cursors: pages.map((p) => p.continuation) };
+  });
 }
 
 export async function trending(): Promise<PipedVideo[]> {
-  return (await trendingPage()).items;
+  const key = "trending";
+  return cached(key, 10 * 60 * 1000, async () => {
+    return (await trendingPage()).items;
+  });
 }
 
 export async function suggest(query: string): Promise<string[]> {
-  // `oe=utf-8` is required: without it YouTube answers in windows-1256 and
-  // every Arabic suggestion comes back as mojibake.
-  const res = await fetch(
-    `https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&hl=ar&gl=eg&oe=utf-8&q=${encodeURIComponent(query)}`,
-  );
-  if (!res.ok) return [];
-  const body = await res.text();
-  const json = body.slice(body.indexOf("(") + 1, body.lastIndexOf(")"));
-  try {
-    const parsed = JSON.parse(json) as [string, [string][]];
-    return (parsed[1] || []).map((row) => row[0]).slice(0, 10);
-  } catch {
-    return [];
-  }
+  const key = `suggest:${query}`;
+  return cached(key, 60 * 60 * 1000, async () => {
+    // `oe=utf-8` is required: without it YouTube answers in windows-1256 and
+    // every Arabic suggestion comes back as mojibake.
+    const res = await fetch(
+      `https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&hl=ar&gl=eg&oe=utf-8&q=${encodeURIComponent(query)}`,
+    );
+    if (!res.ok) return [];
+    const body = await res.text();
+    const json = body.slice(body.indexOf("(") + 1, body.lastIndexOf(")"));
+    try {
+      const parsed = JSON.parse(json) as [string, [string][]];
+      return (parsed[1] || []).map((row) => row[0]).slice(0, 10);
+    } catch {
+      return [];
+    }
+  });
 }
 
 function parseCommentEntities(data: Json): PipedComment[] {
@@ -682,178 +768,181 @@ export async function fetchComments(
 
 /** Everything the watch page needs. Playback itself uses the YouTube player. */
 export async function videoDetails(videoId: string): Promise<StreamData> {
-  const next = await innertube("next", { videoId });
+  const key = `videoDetails:${videoId}`;
+  return cached(key, 60 * 60 * 1000, async () => {
+    const next = await innertube("next", { videoId });
 
-  const primary = collect(next, "videoPrimaryInfoRenderer")[0] ?? {};
-  const secondary = collect(next, "videoSecondaryInfoRenderer")[0] ?? {};
-  const owner = collect(secondary, "videoOwnerRenderer")[0] ?? {};
+    const primary = collect(next, "videoPrimaryInfoRenderer")[0] ?? {};
+    const secondary = collect(next, "videoSecondaryInfoRenderer")[0] ?? {};
+    const owner = collect(secondary, "videoOwnerRenderer")[0] ?? {};
 
-  const title = text(primary.title);
-  if (!title) throw new Error("video unavailable");
+    const title = text(primary.title);
+    if (!title) throw new Error("video unavailable");
 
-  // Accurate like count extraction from modern InnerTube view models, entities, and factoids
-  let likes = 0;
-  const likeEntities = collect(next, "likeCountEntity");
-  for (const ent of likeEntities) {
-    if (ent.likeCountIfIndifferentNumber != null) {
-      likes = Number(ent.likeCountIfIndifferentNumber) || 0;
-      if (likes > 0) break;
-    }
-    if (ent.expandedLikeCountIfIndifferent?.content) {
-      likes = parseCount(ent.expandedLikeCountIfIndifferent.content);
-      if (likes > 0) break;
-    }
-    if (ent.likeCountIfIndifferent?.content) {
-      likes = parseCount(ent.likeCountIfIndifferent.content);
-      if (likes > 0) break;
-    }
-    if (ent.likeCountIfLikedNumber != null) {
-      likes = Number(ent.likeCountIfLikedNumber) || 0;
-      if (likes > 0) break;
-    }
-    if (ent.likeButtonA11yText?.content) {
-      likes = parseCount(ent.likeButtonA11yText.content);
-      if (likes > 0) break;
-    }
-  }
-
-  // Check likeButtonViewModel & segmentedLikeDislikeButtonViewModel
-  if (!likes) {
-    const likeButtonVMs = collect(next, "likeButtonViewModel");
-    for (const vm of likeButtonVMs) {
-      const buttonVMs = collect(vm, "buttonViewModel");
-      for (const b of buttonVMs) {
-        if (b.accessibilityText && /\d/.test(b.accessibilityText)) {
-          const v = parseCount(b.accessibilityText);
-          if (v > 0) {
-            likes = v;
-            break;
-          }
-        }
-        if (b.title && /\d/.test(b.title)) {
-          const v = parseCount(b.title);
-          if (v > 0) {
-            likes = v;
-            break;
-          }
-        }
+    // Accurate like count extraction from modern InnerTube view models, entities, and factoids
+    let likes = 0;
+    const likeEntities = collect(next, "likeCountEntity");
+    for (const ent of likeEntities) {
+      if (ent.likeCountIfIndifferentNumber != null) {
+        likes = Number(ent.likeCountIfIndifferentNumber) || 0;
+        if (likes > 0) break;
       }
-      if (likes > 0) break;
-    }
-  }
-
-  // Check any buttonViewModel with like ID or action
-  if (!likes) {
-    const allButtons = collect(next, "buttonViewModel");
-    for (const b of allButtons) {
-      if (b.accessibilityId === "id.video.like.button" || /like/i.test(b.accessibilityId ?? "")) {
-        if (b.accessibilityText && /\d/.test(b.accessibilityText)) {
-          const v = parseCount(b.accessibilityText);
-          if (v > 0) {
-            likes = v;
-            break;
-          }
-        }
-        if (b.title && /\d/.test(b.title)) {
-          const v = parseCount(b.title);
-          if (v > 0) {
-            likes = v;
-            break;
-          }
-        }
+      if (ent.expandedLikeCountIfIndifferent?.content) {
+        likes = parseCount(ent.expandedLikeCountIfIndifferent.content);
+        if (likes > 0) break;
       }
-    }
-  }
-
-  // Check FactoidRenderer
-  if (!likes) {
-    const factoids = collect(next, "factoidRenderer");
-    for (const f of factoids) {
-      const lbl = f?.label?.simpleText || f?.accessibilityText || "";
-      if (/معجب|إعجاب|like/i.test(lbl)) {
-        likes = parseCount(f?.value?.simpleText || f?.accessibilityText);
+      if (ent.likeCountIfIndifferent?.content) {
+        likes = parseCount(ent.likeCountIfIndifferent.content);
+        if (likes > 0) break;
+      }
+      if (ent.likeCountIfLikedNumber != null) {
+        likes = Number(ent.likeCountIfLikedNumber) || 0;
+        if (likes > 0) break;
+      }
+      if (ent.likeButtonA11yText?.content) {
+        likes = parseCount(ent.likeButtonA11yText.content);
         if (likes > 0) break;
       }
     }
-  }
 
-  // Check Legacy toggleButtonRenderer / likeButton
-  if (!likes) {
-    const legacyButtons = collect(primary, "likeButton");
-    for (const lb of legacyButtons) {
-      const label =
-        text(lb?.toggleButtonRenderer?.defaultText) ??
-        text(lb?.toggleButtonRenderer?.accessibility?.label);
-      const v = parseCount(label ?? "");
-      if (v > 0) {
-        likes = v;
+    // Check likeButtonViewModel & segmentedLikeDislikeButtonViewModel
+    if (!likes) {
+      const likeButtonVMs = collect(next, "likeButtonViewModel");
+      for (const vm of likeButtonVMs) {
+        const buttonVMs = collect(vm, "buttonViewModel");
+        for (const b of buttonVMs) {
+          if (b.accessibilityText && /\d/.test(b.accessibilityText)) {
+            const v = parseCount(b.accessibilityText);
+            if (v > 0) {
+              likes = v;
+              break;
+            }
+          }
+          if (b.title && /\d/.test(b.title)) {
+            const v = parseCount(b.title);
+            if (v > 0) {
+              likes = v;
+              break;
+            }
+          }
+        }
+        if (likes > 0) break;
+      }
+    }
+
+    // Check any buttonViewModel with like ID or action
+    if (!likes) {
+      const allButtons = collect(next, "buttonViewModel");
+      for (const b of allButtons) {
+        if (b.accessibilityId === "id.video.like.button" || /like/i.test(b.accessibilityId ?? "")) {
+          if (b.accessibilityText && /\d/.test(b.accessibilityText)) {
+            const v = parseCount(b.accessibilityText);
+            if (v > 0) {
+              likes = v;
+              break;
+            }
+          }
+          if (b.title && /\d/.test(b.title)) {
+            const v = parseCount(b.title);
+            if (v > 0) {
+              likes = v;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Check FactoidRenderer
+    if (!likes) {
+      const factoids = collect(next, "factoidRenderer");
+      for (const f of factoids) {
+        const lbl = f?.label?.simpleText || f?.accessibilityText || "";
+        if (/معجب|إعجاب|like/i.test(lbl)) {
+          likes = parseCount(f?.value?.simpleText || f?.accessibilityText);
+          if (likes > 0) break;
+        }
+      }
+    }
+
+    // Check Legacy toggleButtonRenderer / likeButton
+    if (!likes) {
+      const legacyButtons = collect(primary, "likeButton");
+      for (const lb of legacyButtons) {
+        const label =
+          text(lb?.toggleButtonRenderer?.defaultText) ??
+          text(lb?.toggleButtonRenderer?.accessibility?.label);
+        const v = parseCount(label ?? "");
+        if (v > 0) {
+          likes = v;
+          break;
+        }
+      }
+    }
+
+    // Accurate date extraction (exact date & relative date)
+    const rawRelDate =
+      text(primary.relativeDateText?.accessibility?.accessibilityData?.label) ||
+      text(primary.relativeDateText);
+    const rawDateText = text(collect(primary, "dateText")[0]) || text(primary.dateText);
+
+    // Check factoid date for clean spelled-out date (e.g. "24 أكتوبر 2009")
+    const factoids = collect(next, "factoidRenderer");
+    let factoidDate = "";
+    for (const f of factoids) {
+      const val = text(f?.value);
+      const lbl = text(f?.label);
+      if (/\d{4}/.test(val) && lbl) {
+        factoidDate = `${lbl} ${val}`.trim();
         break;
       }
     }
-  }
 
-  // Accurate date extraction (exact date & relative date)
-  const rawRelDate =
-    text(primary.relativeDateText?.accessibility?.accessibilityData?.label) ||
-    text(primary.relativeDateText);
-  const rawDateText = text(collect(primary, "dateText")[0]) || text(primary.dateText);
+    const uploadDate = factoidDate || rawDateText || rawRelDate || "";
+    const relativeDate = rawRelDate || "";
 
-  // Check factoid date for clean spelled-out date (e.g. "24 أكتوبر 2009")
-  const factoids = collect(next, "factoidRenderer");
-  let factoidDate = "";
-  for (const f of factoids) {
-    const val = text(f?.value);
-    const lbl = text(f?.label);
-    if (/\d{4}/.test(val) && lbl) {
-      factoidDate = `${lbl} ${val}`.trim();
-      break;
-    }
-  }
+    const channelId = owner?.navigationEndpoint?.browseEndpoint?.browseId ?? "";
 
-  const uploadDate = factoidDate || rawDateText || rawRelDate || "";
-  const relativeDate = rawRelDate || "";
+    const related = extractVideos(collect(next, "secondaryResults")[0] ?? {});
 
-  const channelId = owner?.navigationEndpoint?.browseEndpoint?.browseId ?? "";
+    const allTokens = collect(next, "continuationItemRenderer")
+      .map((c: Json) => c?.continuationEndpoint?.continuationCommand?.token)
+      .filter(Boolean);
 
-  const related = extractVideos(collect(next, "secondaryResults")[0] ?? {});
+    const commentToken =
+      allTokens.find((t: string) => {
+        try {
+          return decodeURIComponent(t).includes("comments-section");
+        } catch {
+          return false;
+        }
+      }) || allTokens[0];
 
-  const allTokens = collect(next, "continuationItemRenderer")
-    .map((c: Json) => c?.continuationEndpoint?.continuationCommand?.token)
-    .filter(Boolean);
+    const commentsData = commentToken
+      ? await fetchComments(commentToken, 30)
+      : { items: [], totalCount: 0 };
 
-  const commentToken =
-    allTokens.find((t: string) => {
-      try {
-        return decodeURIComponent(t).includes("comments-section");
-      } catch {
-        return false;
-      }
-    }) || allTokens[0];
-
-  const commentsData = commentToken
-    ? await fetchComments(commentToken, 30)
-    : { items: [], totalCount: 0 };
-
-  return {
-    title,
-    description:
-      text(collect(secondary, "attributedDescription")[0]) || text(secondary.description),
-    uploadDate,
-    relativeDate,
-    category: "",
-    likes,
-    views: parseCount(text(collect(primary, "videoViewCountRenderer")[0]?.viewCount)),
-    uploader: text(owner.title),
-    uploaderUrl: channelId ? `/channel/${channelId}` : "",
-    uploaderAvatar: owner?.thumbnail?.thumbnails?.at(-1)?.url ?? "",
-    uploaderVerified: JSON.stringify(owner.badges ?? []).includes("VERIFIED"),
-    uploaderSubscriberCount: parseCount(text(owner.subscriberCountText)),
-    videoStreams: [],
-    relatedStreams: related,
-    comments: commentsData.items,
-    commentCount: commentsData.totalCount,
-    commentsContinuation: commentsData.nextContinuation,
-  };
+    return {
+      title,
+      description:
+        text(collect(secondary, "attributedDescription")[0]) || text(secondary.description),
+      uploadDate,
+      relativeDate,
+      category: "",
+      likes,
+      views: parseCount(text(collect(primary, "videoViewCountRenderer")[0]?.viewCount)),
+      uploader: text(owner.title),
+      uploaderUrl: channelId ? `/channel/${channelId}` : "",
+      uploaderAvatar: owner?.thumbnail?.thumbnails?.at(-1)?.url ?? "",
+      uploaderVerified: JSON.stringify(owner.badges ?? []).includes("VERIFIED"),
+      uploaderSubscriberCount: parseCount(text(owner.subscriberCountText)),
+      videoStreams: [],
+      relatedStreams: related,
+      comments: commentsData.items,
+      commentCount: commentsData.totalCount,
+      commentsContinuation: commentsData.nextContinuation,
+    };
+  });
 }
 
 export async function getCommentsPage(
@@ -865,118 +954,122 @@ export async function getCommentsPage(
 
 /** Videos tab of a channel (accepts UC… id or @handle). */
 export async function channel(input: string): Promise<ChannelData> {
-  const raw = input.trim();
-  let browseId = raw.startsWith("UC") ? raw : "";
+  const key = `channel:${input.trim()}`;
+  return cached(key, 30 * 60 * 1000, async () => {
+    const raw = input.trim();
+    let browseId = raw.startsWith("UC") ? raw : "";
 
-  if (!browseId) {
-    const handle = raw.replace(/^\/?(c\/|user\/|channel\/)?@?/, "");
-    const found = await innertube("search", {
-      query: handle,
-      params: "EgIQAg%3D%3D", // filter = channels
-    });
-    browseId =
-      collect(found, "channelRenderer")[0]?.channelId ??
-      collect(found, "browseEndpoint").find((b: Json) => b?.browseId?.startsWith("UC"))?.browseId ??
+    if (!browseId) {
+      const handle = raw.replace(/^\/?(c\/|user\/|channel\/)?@?/, "");
+      const found = await innertube("search", {
+        query: handle,
+        params: "EgIQAg%3D%3D", // filter = channels
+      });
+      browseId =
+        collect(found, "channelRenderer")[0]?.channelId ??
+        collect(found, "browseEndpoint").find((b: Json) => b?.browseId?.startsWith("UC"))
+          ?.browseId ??
+        "";
+      if (!browseId) throw new Error("channel not found");
+    }
+
+    const [homeResult, vidsResult, shortsResult] = await Promise.allSettled([
+      innertube("browse", { browseId }),
+      innertube("browse", { browseId, params: "EgZ2aWRlb3PyBgQKAjoA" }),
+      innertube("browse", { browseId, params: "EgZzaG9ydHPyBgUKA5oBAA%3D%3D" }),
+    ]);
+
+    const homeData = homeResult.status === "fulfilled" ? homeResult.value : {};
+    const data = vidsResult.status === "fulfilled" ? vidsResult.value : {};
+    const shortsData = shortsResult.status === "fulfilled" ? shortsResult.value : {};
+
+    const header =
+      collect(homeData, "c4TabbedHeaderRenderer")[0] ??
+      collect(homeData, "pageHeaderViewModel")[0] ??
+      collect(data, "c4TabbedHeaderRenderer")[0] ??
+      collect(data, "pageHeaderViewModel")[0] ??
+      {};
+    const meta =
+      collect(homeData, "microformatDataRenderer")[0] ??
+      collect(data, "microformatDataRenderer")[0] ??
+      {};
+
+    const name =
+      text(header.title) ||
+      text(collect(header, "dynamicTextViewModel")[0]?.text) ||
+      meta.title ||
       "";
-    if (!browseId) throw new Error("channel not found");
-  }
 
-  const [homeResult, vidsResult, shortsResult] = await Promise.allSettled([
-    innertube("browse", { browseId }),
-    innertube("browse", { browseId, params: "EgZ2aWRlb3PyBgQKAjoA" }),
-    innertube("browse", { browseId, params: "EgZzaG9ydHPyBgUKA5oBAA%3D%3D" }),
-  ]);
+    const avatar =
+      header?.avatar?.thumbnails?.at(-1)?.url ??
+      collect(header, "avatarViewModel")[0]?.image?.sources?.at(-1)?.url ??
+      meta.thumbnail?.thumbnails?.at(-1)?.url ??
+      "";
 
-  const homeData = homeResult.status === "fulfilled" ? homeResult.value : {};
-  const data = vidsResult.status === "fulfilled" ? vidsResult.value : {};
-  const shortsData = shortsResult.status === "fulfilled" ? shortsResult.value : {};
+    const banner =
+      header?.banner?.thumbnails?.at(-1)?.url ??
+      collect(header, "banner")[0]?.imageBannerViewModel?.image?.sources?.at(-1)?.url;
 
-  const header =
-    collect(homeData, "c4TabbedHeaderRenderer")[0] ??
-    collect(homeData, "pageHeaderViewModel")[0] ??
-    collect(data, "c4TabbedHeaderRenderer")[0] ??
-    collect(data, "pageHeaderViewModel")[0] ??
-    {};
-  const meta =
-    collect(homeData, "microformatDataRenderer")[0] ??
-    collect(data, "microformatDataRenderer")[0] ??
-    {};
+    const metaParts = collect(header, "metadataParts").flat();
+    const subsPart = metaParts.find((p: Json) =>
+      /مشترك|subscri/i.test(text(p?.text) || text(p?.accessibilityLabel)),
+    );
+    const vidsPart = metaParts.find((p: Json) =>
+      /فيديو|video/i.test(text(p?.text) || text(p?.accessibilityLabel)),
+    );
 
-  const name =
-    text(header.title) ||
-    text(collect(header, "dynamicTextViewModel")[0]?.text) ||
-    meta.title ||
-    "";
+    const subscriberText =
+      text(subsPart?.text) ||
+      text(subsPart?.accessibilityLabel) ||
+      text(header.subscriberCountText) ||
+      "";
+    const videoCountText =
+      text(vidsPart?.text) ||
+      text(vidsPart?.accessibilityLabel) ||
+      text(header.videosCountText) ||
+      text(header.videoCountText) ||
+      "";
 
-  const avatar =
-    header?.avatar?.thumbnails?.at(-1)?.url ??
-    collect(header, "avatarViewModel")[0]?.image?.sources?.at(-1)?.url ??
-    meta.thumbnail?.thumbnails?.at(-1)?.url ??
-    "";
+    const subscriberCount = parseCount(subscriberText);
+    const videoCount = parseCount(videoCountText);
 
-  const banner =
-    header?.banner?.thumbnails?.at(-1)?.url ??
-    collect(header, "banner")[0]?.imageBannerViewModel?.image?.sources?.at(-1)?.url;
+    // Extract channel videos and make sure uploader metadata is set
+    const rawVideos = extractVideos(data);
+    const homeVideos = extractVideos(homeData).filter((v) => !v.isShort);
+    const combinedVideos = rawVideos.length > 0 ? rawVideos : homeVideos;
 
-  const metaParts = collect(header, "metadataParts").flat();
-  const subsPart = metaParts.find((p: Json) =>
-    /مشترك|subscri/i.test(text(p?.text) || text(p?.accessibilityLabel)),
-  );
-  const vidsPart = metaParts.find((p: Json) =>
-    /فيديو|video/i.test(text(p?.text) || text(p?.accessibilityLabel)),
-  );
+    const videos = combinedVideos.map((v) => ({
+      ...v,
+      uploaderName: v.uploaderName || name,
+      uploaderAvatar: v.uploaderAvatar || avatar,
+      uploaderUrl: v.uploaderUrl || `/channel/${browseId}`,
+    }));
 
-  const subscriberText =
-    text(subsPart?.text) ||
-    text(subsPart?.accessibilityLabel) ||
-    text(header.subscriberCountText) ||
-    "";
-  const videoCountText =
-    text(vidsPart?.text) ||
-    text(vidsPart?.accessibilityLabel) ||
-    text(header.videosCountText) ||
-    text(header.videoCountText) ||
-    "";
+    // Extract channel shorts
+    const shorts = extractVideos(shortsData).map((s) => ({
+      ...s,
+      uploaderName: name,
+      uploaderAvatar: avatar,
+      uploaderUrl: `/channel/${browseId}`,
+    }));
 
-  const subscriberCount = parseCount(subscriberText);
-  const videoCount = parseCount(videoCountText);
-
-  // Extract channel videos and make sure uploader metadata is set
-  const rawVideos = extractVideos(data);
-  const homeVideos = extractVideos(homeData).filter((v) => !v.isShort);
-  const combinedVideos = rawVideos.length > 0 ? rawVideos : homeVideos;
-
-  const videos = combinedVideos.map((v) => ({
-    ...v,
-    uploaderName: v.uploaderName || name,
-    uploaderAvatar: v.uploaderAvatar || avatar,
-    uploaderUrl: v.uploaderUrl || `/channel/${browseId}`,
-  }));
-
-  // Extract channel shorts
-  const shorts = extractVideos(shortsData).map((s) => ({
-    ...s,
-    uploaderName: name,
-    uploaderAvatar: avatar,
-    uploaderUrl: `/channel/${browseId}`,
-  }));
-
-  return {
-    id: browseId,
-    name,
-    avatarUrl: avatar,
-    bannerUrl: banner,
-    subscriberCount: subscriberCount || undefined,
-    subscriberText: subscriberText || undefined,
-    videoCount: videoCount || undefined,
-    videoCountText: videoCountText || undefined,
-    description: meta.description ?? "",
-    verified: JSON.stringify(header.badges ?? []).includes("VERIFIED"),
-    relatedStreams: videos,
-    shorts,
-    nextVideos: continuationToken(rawVideos.length > 0 ? data : homeData),
-    nextShorts: continuationToken(shortsData),
-  };
+    return {
+      id: browseId,
+      name,
+      avatarUrl: avatar,
+      bannerUrl: banner,
+      subscriberCount: subscriberCount || undefined,
+      subscriberText: subscriberText || undefined,
+      videoCount: videoCount || undefined,
+      videoCountText: videoCountText || undefined,
+      description: meta.description ?? "",
+      verified: JSON.stringify(header.badges ?? []).includes("VERIFIED"),
+      relatedStreams: videos,
+      shorts,
+      nextVideos: continuationToken(rawVideos.length > 0 ? data : homeData),
+      nextShorts: continuationToken(shortsData),
+    };
+  });
 }
 
 /** Fetch a generic continuation page (works for channel tabs, playlists, etc). */
