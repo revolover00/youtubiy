@@ -85,7 +85,10 @@ async function generateCandidates(
   const relatedIds = new Set<string>();
 
   const rankedSubs = [...subs]
-    .sort((a, b) => (profile.channels.get(b.channel_id) ?? 0) - (profile.channels.get(a.channel_id) ?? 0))
+    .sort(
+      (a, b) =>
+        (profile.channels.get(b.channel_id) ?? 0) - (profile.channels.get(a.channel_id) ?? 0),
+    )
     .filter((s) => !profile.muted.has(s.channel_id))
     .slice(0, 25);
 
@@ -175,11 +178,7 @@ function rank(
   return out.sort((a, b) => b.score - a.score);
 }
 
-function diversify(
-  scored: ScoredItem[],
-  pool: Map<string, Candidate>,
-  size: number,
-): ScoredItem[] {
+function diversify(scored: ScoredItem[], pool: Map<string, Candidate>, size: number): ScoredItem[] {
   const picked: ScoredItem[] = [];
   const perChannel = new Map<string, number>();
   const skipped: ScoredItem[] = [];

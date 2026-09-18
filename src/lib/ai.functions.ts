@@ -33,9 +33,7 @@ export const aiRerankFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ scores: Record<string, number>; reason?: string }> => {
     const ai = await getClient();
 
-    const list = data.candidates
-      .map((c, i) => `${i}|${c.id}|${c.title}|${c.channel}`)
-      .join("\n");
+    const list = data.candidates.map((c, i) => `${i}|${c.id}|${c.title}|${c.channel}`).join("\n");
 
     const prompt = [
       "أنت محرّك ترشيح فيديوهات. قيّم كل فيديو حسب احتمال أن يشاهده هذا المستخدم حتى النهاية.",
