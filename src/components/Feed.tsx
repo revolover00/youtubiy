@@ -22,6 +22,7 @@ import {
   isShortsVideo,
   timeAgo,
   videoIdFromUrl,
+  channelIdFromUrl,
 } from "../lib/format";
 import type { PipedVideo, SearchChannel, SearchPlaylist } from "../lib/types";
 import { useLanguage } from "../lib/i18n";
