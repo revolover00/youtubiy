@@ -38,7 +38,7 @@ import {
   Avatar,
 } from "./components/Feed";
 import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
-import { buildHomeFeed, buildSubscriptionsFeed } from "./lib/recommend";
+import { buildHomeFeed, buildSubscriptionsFeed, rankIncoming } from "./lib/recommend";
 import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import {
@@ -151,6 +151,7 @@ export default function App() {
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [watchLater, setWatchLaterState] = useState<string[]>([]);
   const [liked, setLikedState] = useState<string[]>([]);
+  const [signalsReady, setSignalsReady] = useState(false);
 
   // feed
   const [feed, setFeed] = useState<PipedVideo[] | null>(null);
@@ -160,6 +161,7 @@ export default function App() {
   const [feedErr, setFeedErr] = useState(false);
   const [feedAttempt, setFeedAttempt] = useState(0);
   const feedNext = useRef<unknown | null>(null);
+  const feedReserve = useRef<PipedVideo[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -173,28 +175,35 @@ export default function App() {
 
   // initial load and user change sync
   useEffect(() => {
-    getSubscriptions()
-      .then(setSubs)
-      .catch(() => {});
-    getHistory()
-      .then(setHistory)
-      .catch(() => {});
+    setSignalsReady(false);
+
     getCustomPlaylists()
       .then(setCustomPlaylists)
       .catch(() => {});
     fetchUserWatchLater()
       .then(setWatchLaterState)
       .catch(() => setWatchLaterState(getWatchLater()));
-    fetchUserLiked()
+
+    const syncSubscriptions = getSubscriptions()
+      .then(setSubs)
+      .catch(() => {});
+    const syncHistory = getHistory()
+      .then(setHistory)
+      .catch(() => {});
+    const syncLiked = fetchUserLiked()
       .then(setLikedState)
       .catch(() => setLikedState(getLiked()));
-    fetchUserProgress()
+    const syncProgress = fetchUserProgress()
       .then((p) => {
         Object.entries(p).forEach(([id, time]) => {
           appStore.setPlaybackTime(id, time);
         });
       })
       .catch(() => {});
+
+    Promise.allSettled([syncSubscriptions, syncHistory, syncLiked, syncProgress]).then(() => {
+      setSignalsReady(true);
+    });
 
     appStore.setBackgroundPlay(getBackgroundPlay());
   }, [user]);
@@ -302,6 +311,10 @@ export default function App() {
 
   useEffect(() => {
     if (!isFeedMode) return;
+    if (feedKind === "home" && !signalsReady) {
+      setFeed(null);
+      return;
+    }
     const gen = ++feedGen.current;
     setFeed(null);
     setChannels([]);
@@ -323,20 +336,23 @@ export default function App() {
           const r = await buildHomeFeed(subs, history, liked, {
             progress: getLocalProgress(),
             searches: JSON.parse(localStorage.getItem("yt.searches") || "[]"),
-            useAI: true,
+            useAI: false,
           });
           items = r.videos;
           next = r.next;
+          feedReserve.current = r.reserve || [];
         } else if (feedKind === "trending") {
           const r = await trendingPaged();
           items = r.items;
           next = r.next;
+          feedReserve.current = [];
         } else {
           const r = await searchPaged(feedQuery);
           items = r.items;
           chans = r.channels || [];
           plays = r.playlists || [];
           next = r.next;
+          feedReserve.current = [];
         }
         if (gen !== feedGen.current) return;
         setFeed(items);
@@ -344,17 +360,52 @@ export default function App() {
         setPlaylists(plays);
 
         feedNext.current = next;
-        setHasMore(!!next);
+        setHasMore(feedKind === "home" ? feedReserve.current.length > 0 || !!next : !!next);
       } catch {
         if (gen === feedGen.current) setFeedErr(true);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFeedMode, feedKind, feedQuery, feedAttempt]);
+  }, [isFeedMode, feedKind, feedQuery, feedAttempt, signalsReady, history.length, subs.length]);
 
   const loadMore = useCallback(async () => {
-    if (loadingMore || !feedNext.current) return;
+    if (loadingMore) return;
     const gen = feedGen.current;
+
+    if (feedKind === "home") {
+      if (feedReserve.current.length > 0) {
+        const nextBatch = feedReserve.current.splice(0, 20);
+        setFeed((f) => {
+          const have = new Set((f || []).map((v) => v.url));
+          return [...(f || []), ...nextBatch.filter((v) => !have.has(v.url))];
+        });
+        setHasMore(feedReserve.current.length > 0 || !!feedNext.current);
+        return;
+      }
+      if (feedNext.current) {
+        setLoadingMore(true);
+        try {
+          const r = await trendingPaged(feedNext.current);
+          if (gen !== feedGen.current) return;
+          const ranked = rankIncoming(r.items);
+          setFeed((f) => {
+            const have = new Set((f || []).map((v) => v.url));
+            return [...(f || []), ...ranked.filter((v) => !have.has(v.url))];
+          });
+          feedNext.current = r.next;
+          setHasMore(feedReserve.current.length > 0 || !!r.next);
+        } catch {
+          if (gen === feedGen.current) setHasMore(false);
+        } finally {
+          if (gen === feedGen.current) setLoadingMore(false);
+        }
+        return;
+      }
+      setHasMore(false);
+      return;
+    }
+
+    if (!feedNext.current) return;
     setLoadingMore(true);
     try {
       const r =

@@ -26,10 +26,14 @@ const MAX_PER_CHANNEL_TOTAL = 4;
 
 export interface FeedResult {
   videos: PipedVideo[];
+  reserve: PipedVideo[];
   coldStart: boolean;
   next: unknown | null;
   debug?: ScoredItem[];
 }
+
+let lastProfile: TasteProfile | null = null;
+let lastWatched = new Set<string>();
 
 export interface ScoredItem {
   id: string;
@@ -233,6 +237,8 @@ export async function buildHomeFeed(
   const { progress = {}, searches = [], size = FEED_SIZE, useAI = false, aiPrompt } = options;
 
   const profile = buildTasteProfile({ history, progress, likedIds, subs, searches });
+  lastProfile = profile;
+  lastWatched = new Set(profile.watched);
   const coldStart = profile.signalCount < 5;
 
   if (coldStart) {
@@ -245,8 +251,10 @@ export async function buildHomeFeed(
         (ch.relatedStreams || []).slice(0, 5).forEach((v) => addCandidate(pool, v, "sub"));
       }),
     );
+    const all = [...pool.values()].map((c) => c.video);
     return {
-      videos: [...pool.values()].map((c) => c.video).slice(0, size),
+      videos: all.slice(0, size),
+      reserve: all.slice(size),
       coldStart: true,
       next: page.next,
     };
@@ -269,10 +277,13 @@ export async function buildHomeFeed(
     }
   }
 
-  const finalItems = diversify(scored, pool, size);
-  const videos = finalItems
+  const finalItems = diversify(scored, pool, size * 4);
+  const allVideos = finalItems
     .map((i) => pool.get(i.id)?.video)
     .filter((v): v is PipedVideo => Boolean(v));
+
+  const videos = allVideos.slice(0, size);
+  const reserve = allVideos.slice(size);
 
   if (videos.length < 10) {
     const have = new Set(videos.map((v) => videoIdFromUrl(v.url)));
@@ -286,7 +297,45 @@ export async function buildHomeFeed(
     }
   }
 
-  return { videos, coldStart: false, next, debug: finalItems };
+  return { videos, reserve, coldStart: false, next, debug: finalItems };
+}
+
+export function rankIncoming(items: PipedVideo[]): PipedVideo[] {
+  if (!lastProfile) return items;
+  const profile = lastProfile;
+  const scored: { video: PipedVideo; score: number }[] = [];
+
+  for (const video of items) {
+    const id = videoIdFromUrl(video.url);
+    if (id && (lastWatched.has(id) || profile.watched.has(id))) continue;
+
+    const chId = channelIdFromUrl(video.uploaderUrl || "");
+    if (chId && profile.muted.has(chId)) continue;
+
+    const chAff = channelAffinity(profile, video);
+    if (chAff <= -0.99) continue;
+
+    const parts = {
+      channel: Math.max(0, chAff) * WEIGHTS.channel,
+      topic: topicMatch(profile, video) * WEIGHTS.topic,
+      related: 0,
+      freshness: freshness(ageDays(video.uploaded, video.uploadedDate)) * WEIGHTS.freshness,
+      quality: qualityPrior(video) * WEIGHTS.quality,
+      duration: durationFit(video, profile.preferredDuration) * WEIGHTS.duration,
+    };
+
+    let score = Object.values(parts).reduce((a, b) => a + b, 0);
+
+    if (chAff < 0) score += chAff * 0.25;
+
+    if (isShortsVideo(video)) {
+      score *= profile.preferredDuration < 180 ? 1.05 : 0.7;
+    }
+
+    scored.push({ video, score });
+  }
+
+  return scored.sort((a, b) => b.score - a.score).map((s) => s.video);
 }
 
 export async function buildSubscriptionsFeed(subs: Subscription[]): Promise<PipedVideo[]> {

@@ -421,19 +421,56 @@ export async function getHistory(): Promise<HistoryRow[]> {
         video_id: data.videoId || d.id,
         title: data.title || "",
         channel_name: data.channelTitle || "",
+        channel_id: data.channelId || "",
+        category: data.category || "",
+        progress: data.progress || 0,
         thumbnail: data.thumbnail,
         duration: data.duration,
         watched_at: data.watchedAt,
       });
     });
 
-    if (remote.length > 0) {
-      remote.sort((a, b) => (b.watched_at || "").localeCompare(a.watched_at || ""));
-      write("yt.history", remote);
-      return remote;
+    const mergedMap = new Map<string, HistoryRow>();
+    for (const loc of local) {
+      if (loc.video_id) {
+        mergedMap.set(loc.video_id, loc);
+      }
     }
 
-    return local;
+    for (const rem of remote) {
+      const loc = mergedMap.get(rem.video_id);
+      if (!loc) {
+        mergedMap.set(rem.video_id, rem);
+      } else {
+        const remTime = rem.watched_at ? new Date(rem.watched_at).getTime() : 0;
+        const locTime = loc.watched_at ? new Date(loc.watched_at).getTime() : 0;
+        const isRemoteNewer =
+          !isNaN(remTime) && !isNaN(locTime)
+            ? remTime >= locTime
+            : (rem.watched_at || "").localeCompare(loc.watched_at || "") >= 0;
+
+        if (isRemoteNewer) {
+          mergedMap.set(rem.video_id, {
+            ...rem,
+            channel_id: rem.channel_id || loc.channel_id || "",
+            category: rem.category || loc.category || "",
+            progress: rem.progress || loc.progress || 0,
+          });
+        } else {
+          mergedMap.set(rem.video_id, {
+            ...loc,
+            channel_id: loc.channel_id || rem.channel_id || "",
+            category: loc.category || rem.category || "",
+            progress: loc.progress || rem.progress || 0,
+          });
+        }
+      }
+    }
+
+    const merged = Array.from(mergedMap.values());
+    merged.sort((a, b) => (b.watched_at || "").localeCompare(a.watched_at || ""));
+    write("yt.history", merged);
+    return merged;
   } catch (error) {
     console.warn("Falling back to local history:", error);
     return local;
@@ -455,6 +492,8 @@ export async function addHistory(row: HistoryRow): Promise<void> {
       videoId: row.video_id,
       title: row.title || "Video",
       channelTitle: row.channel_name || "",
+      channelId: row.channel_id || "",
+      category: row.category || "",
       thumbnail: row.thumbnail || "",
       duration: row.duration || 0,
       progress: row.progress || 0,
