@@ -48,10 +48,13 @@ import { ShortsIcon, SubscriptionsIcon } from "./components/icons";
 import {
   buildHomeFeed,
   buildSubscriptionsFeed,
+  lastFeedDiagnostics,
+  lastProfile,
   rankIncoming,
   rerankUnseenWithAI,
 } from "./lib/recommend";
-import { buildTasteProfile } from "./lib/signals";
+import { pushDebug } from "./lib/debug";
+import DebugPanel from "./components/DebugPanel";
 import { getStreams, searchPaged, trendingPaged } from "./lib/api";
 import { TOPIC_QUERY } from "./lib/config";
 import {
@@ -182,8 +185,43 @@ export default function App() {
   // feed
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [feedAttempt, setFeedAttempt] = useState(0);
+  const [feedFallbackBanner, setFeedFallbackBanner] = useState(false);
   const feedReserve = useRef<PipedVideo[]>([]);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+
+  const subsRef = useRef(subs);
+  subsRef.current = subs;
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const likedRef = useRef(liked);
+  likedRef.current = liked;
+
+  // Auto-refresh home feed if > 30 minutes have elapsed since last build
+  useEffect(() => {
+    const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+    const checkAgeAndRefresh = () => {
+      try {
+        const raw = localStorage.getItem("yt.homeFeedCache");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.at === "number") {
+            if (Date.now() - parsed.at >= THIRTY_MINUTES_MS) {
+              setFeedAttempt((a) => a + 1);
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const interval = window.setInterval(checkAgeAndRefresh, 60 * 1000);
+    window.addEventListener("focus", checkAgeAndRefresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", checkAgeAndRefresh);
+    };
+  }, []);
 
   const notify = useCallback(
     (
@@ -345,26 +383,13 @@ export default function App() {
       return ["subs", subs.length, feedAttempt];
     }
     if (feedKind === "home") {
-      return [
-        "home-feed",
-        user?.uid || "guest",
-        `${history.length}-${subs.length}-${liked.length}-${feedAttempt}`,
-      ];
+      return ["home-feed", user?.uid || "guest", feedAttempt];
     }
     if (feedKind === "trending") {
       return ["trending", feedAttempt];
     }
     return ["search", feedQuery, feedAttempt];
-  }, [
-    route.type,
-    feedKind,
-    feedQuery,
-    feedAttempt,
-    user?.uid,
-    history.length,
-    subs.length,
-    liked.length,
-  ]);
+  }, [route.type, feedKind, feedQuery, feedAttempt, user?.uid, subs.length]);
 
   const queryClient = useQueryClient();
 
@@ -388,9 +413,34 @@ export default function App() {
 
       if (feedKind === "home") {
         if (pageParam === null) {
-          // Fast initial paint with trending
-          const r = await trendingPaged();
-          return { items: r.items, next: r.next, channels: [], playlists: [] };
+          const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+          let cachedVideos: PipedVideo[] | null = null;
+          try {
+            const raw = localStorage.getItem("yt.homeFeedCache");
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const expectedUid = user?.uid || "guest";
+              if (
+                parsed &&
+                parsed.uid === expectedUid &&
+                typeof parsed.at === "number" &&
+                Date.now() - parsed.at < SIX_HOURS_MS &&
+                Array.isArray(parsed.videos) &&
+                parsed.videos.length > 0
+              ) {
+                cachedVideos = parsed.videos.slice(0, 40);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+
+          if (cachedVideos && cachedVideos.length > 0) {
+            return { items: cachedVideos, next: null, channels: [], playlists: [] };
+          }
+
+          // If no cache, return empty so skeleton shows until buildHomeFeed finishes
+          return { items: [], next: null, channels: [], playlists: [] };
         } else {
           if (feedReserve.current.length > 0) {
             const nextBatch = feedReserve.current.splice(0, 20);
@@ -401,7 +451,7 @@ export default function App() {
               playlists: [],
             };
           }
-          if (pageParam) {
+          if (pageParam && pageParam !== "has_reserve") {
             const r = await trendingPaged(pageParam);
             const ranked = rankIncoming(r.items);
             return { items: ranked, next: r.next, channels: [], playlists: [] };
@@ -444,25 +494,59 @@ export default function App() {
     (async () => {
       try {
         const searches = JSON.parse(localStorage.getItem("yt.searches") || "[]");
-        const getProgress = (): Record<string, number> => {
-          try {
-            return JSON.parse(localStorage.getItem("yt_progress_map") || "{}");
-          } catch {
-            return {};
-          }
-        };
 
-        const r = await buildHomeFeed(subs, history, liked, {
-          progress: getProgress(),
+        const r = await buildHomeFeed(subsRef.current, historyRef.current, likedRef.current, {
+          progress: getLocalProgress(),
           searches,
           dismissed: getDismissed(),
         });
 
         if (cancelled) return;
 
+        // Check if more than half of the sources failed
+        const diag = lastFeedDiagnostics;
+        if (diag?.stats) {
+          const totalAttempts =
+            diag.stats.sub.ok +
+            diag.stats.sub.fail +
+            diag.stats.related.ok +
+            diag.stats.related.fail +
+            diag.stats.interest.ok +
+            diag.stats.interest.fail +
+            diag.stats.trending.ok +
+            diag.stats.trending.fail;
+          const totalFails =
+            diag.stats.sub.fail +
+            diag.stats.related.fail +
+            diag.stats.interest.fail +
+            diag.stats.trending.fail;
+          if (totalAttempts > 0 && totalFails > totalAttempts / 2) {
+            setFeedFallbackBanner(true);
+          } else {
+            setFeedFallbackBanner(false);
+          }
+        } else {
+          setFeedFallbackBanner(false);
+        }
+
         feedReserve.current = r.reserve || [];
 
+        // Save last 40 videos to cache
+        try {
+          localStorage.setItem(
+            "yt.homeFeedCache",
+            JSON.stringify({
+              uid: user?.uid || "guest",
+              at: Date.now(),
+              videos: (r.videos || []).slice(0, 40),
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+
         const currentScroll = window.scrollY || document.documentElement.scrollTop;
+        const currentRoute = appStore.getSnapshot().route;
 
         type FeedPage = {
           items: PipedVideo[];
@@ -472,62 +556,84 @@ export default function App() {
         };
         type InfiniteFeed = { pages: FeedPage[]; pageParams: unknown[] };
 
-        queryClient.setQueryData(feedQueryKey, (old: InfiniteFeed | undefined) => {
-          if (!old || !old.pages || old.pages.length === 0) return old;
-          const newPages = [...old.pages];
-          newPages[0] = {
-            ...newPages[0],
-            items: r.videos,
-            next: r.next,
-          };
-          return { ...old, pages: newPages };
-        });
+        // Only replace displayed list if scrollY < 300 and route is still home
+        if (currentScroll < 300 && currentRoute.type === "home") {
+          queryClient.setQueryData(feedQueryKey, (old: InfiniteFeed | undefined) => {
+            if (!old || !old.pages || old.pages.length === 0) {
+              return {
+                pages: [{ items: r.videos, next: r.next, channels: [], playlists: [] }],
+                pageParams: [null],
+              };
+            }
+            const newPages = [...old.pages];
+            newPages[0] = {
+              ...newPages[0],
+              items: r.videos,
+              next: r.next,
+            };
+            return { ...old, pages: newPages };
+          });
 
-        requestAnimationFrame(() => {
-          window.scrollTo({ top: currentScroll, behavior: "instant" });
-        });
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: currentScroll, behavior: "instant" });
+          });
+        }
 
         // Async AI re-ranking on unseen items
-        if (r.videos && r.videos.length > 8) {
-          const profile = buildTasteProfile({
-            history,
-            progress: getProgress(),
-            likedIds: liked,
-            subs,
-            searches,
-          });
-          const reranked = await rerankUnseenWithAI(r, profile);
+        if (r.videos && r.videos.length > 8 && lastProfile) {
+          const reranked = await rerankUnseenWithAI(r, lastProfile);
 
           if (cancelled) return;
 
           if (reranked && reranked.videos) {
             feedReserve.current = reranked.reserve || [];
+            try {
+              localStorage.setItem(
+                "yt.homeFeedCache",
+                JSON.stringify({
+                  uid: user?.uid || "guest",
+                  at: Date.now(),
+                  videos: (reranked.videos || []).slice(0, 40),
+                }),
+              );
+            } catch {
+              /* ignore */
+            }
+
             const scrollBeforeAI = window.scrollY || document.documentElement.scrollTop;
+            const routeBeforeAI = appStore.getSnapshot().route;
 
-            queryClient.setQueryData(feedQueryKey, (old: InfiniteFeed | undefined) => {
-              if (!old || !old.pages || old.pages.length === 0) return old;
-              const newPages = [...old.pages];
-              newPages[0] = {
-                ...newPages[0],
-                items: reranked.videos,
-              };
-              return { ...old, pages: newPages };
-            });
+            if (scrollBeforeAI < 300 && routeBeforeAI.type === "home") {
+              queryClient.setQueryData(feedQueryKey, (old: InfiniteFeed | undefined) => {
+                if (!old || !old.pages || old.pages.length === 0) return old;
+                const newPages = [...old.pages];
+                newPages[0] = {
+                  ...newPages[0],
+                  items: reranked.videos,
+                };
+                return { ...old, pages: newPages };
+              });
 
-            requestAnimationFrame(() => {
-              window.scrollTo({ top: scrollBeforeAI, behavior: "instant" });
-            });
+              requestAnimationFrame(() => {
+                window.scrollTo({ top: scrollBeforeAI, behavior: "instant" });
+              });
+            }
           }
         }
-      } catch {
-        // Fallback to initial trending on error
+      } catch (err) {
+        pushDebug(
+          "فشل بناء الفيد",
+          "home-feed/build",
+          err instanceof Error ? err.stack || err.message : String(err),
+        );
+        setFeedFallbackBanner(true);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [isFeedMode, feedKind, signalsReady, feedQueryKey, queryClient, subs, history, liked]);
+  }, [isFeedMode, feedKind, signalsReady, feedQueryKey, queryClient, user?.uid]);
 
   const feed = useMemo(() => {
     if (!isFeedMode) return null;
@@ -542,6 +648,9 @@ export default function App() {
           allItems.push(v);
         }
       }
+    }
+    if (feedKind === "home" && allItems.length === 0) {
+      return null;
     }
     return allItems;
   }, [isFeedMode, feedKind, signalsReady, infiniteFeedData]);
@@ -709,6 +818,7 @@ export default function App() {
     setChip("All");
     setRoute({ type: "home" });
     setActiveNav("home");
+    setFeedAttempt((a) => a + 1);
     if (pathname !== "/") void routerNav({ to: "/" });
     window.scrollTo({ top: 0 });
   };
@@ -1533,6 +1643,15 @@ export default function App() {
                   </div>
                 )}
 
+                {feedFallbackBanner && feedKind === "home" && !isSearchActive && (
+                  <div className="mb-4 px-3.5 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-2 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-400 font-bold">⚠️</span>
+                      <span>تعذّر تخصيص الفيد، يُعرض محتوى عام</span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8 mt-2">
                   {first.map((v, i) => (
                     <VideoCard key={v.url} {...cardProps(v, i)} />
@@ -1832,6 +1951,9 @@ export default function App() {
           setFeedAttempt((a) => a + 1);
         }}
       />
+
+      {/* Debug Panel */}
+      <DebugPanel />
     </div>
   );
 }

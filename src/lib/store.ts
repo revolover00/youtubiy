@@ -262,17 +262,24 @@ export async function syncUserProfile(user: {
   displayName?: string | null;
   photoURL?: string | null;
 }): Promise<void> {
-  const userPath = `users/${user.uid}`;
+  const currentUser = auth.currentUser;
+  // Firestore security rules require request.auth != null and request.auth.uid == userId.
+  // If the user is not authenticated in Firebase Auth or the UID doesn't match, do not attempt Firestore write.
+  if (!currentUser) {
+    return;
+  }
+  const targetUid = currentUser.uid;
+  const userPath = `users/${targetUid}`;
   const now = new Date().toISOString();
   try {
-    const userDocRef = doc(db, "users", user.uid);
+    const userDocRef = doc(db, "users", targetUid);
     await setDoc(
       userDocRef,
       {
-        userId: user.uid,
-        email: user.email || "anonymous@youtube.local",
-        displayName: user.displayName || "User",
-        photoURL: user.photoURL || "",
+        userId: targetUid,
+        email: (currentUser.email || user.email || "anonymous@youtube.local").slice(0, 200),
+        displayName: (currentUser.displayName || user.displayName || "User").slice(0, 120),
+        photoURL: (currentUser.photoURL || user.photoURL || "").slice(0, 1000),
         createdAt: now,
         updatedAt: now,
       },

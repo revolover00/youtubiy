@@ -1,4 +1,11 @@
-import { getChannel, getStreams, homeCandidates, searchPaged, trendingPaged } from "./api";
+import {
+  channelFeed,
+  getChannel,
+  getStreams,
+  homeCandidates,
+  searchPaged,
+  trendingPaged,
+} from "./api";
 import { ageDays, channelIdFromUrl, isShortsVideo, videoIdFromUrl } from "./format";
 import {
   buildTasteProfile,
@@ -7,7 +14,7 @@ import {
   topicMatch,
   type TasteProfile,
 } from "./signals";
-import { getDismissed } from "./store";
+import { getDismissed, getLocalProgress } from "./store";
 import type { HistoryRow, PipedVideo, Subscription } from "./types";
 
 export const WEIGHTS = {
@@ -24,6 +31,51 @@ const CANDIDATE_CAP = 450;
 const EXPLORE_RATIO = 0.15;
 const MAX_PER_CHANNEL_TOP = 2;
 const MAX_PER_CHANNEL_TOTAL = 4;
+
+export interface FeedDiagnostics {
+  builtAt: number;
+  buildMs: number;
+  stats: {
+    sub: { ok: number; fail: number };
+    related: { ok: number; fail: number };
+    interest: { ok: number; fail: number };
+    trending: { ok: number; fail: number };
+  };
+  errors: string[];
+  signalCount: number;
+  coldStart: boolean;
+  mutedCount: number;
+  poolSize: number;
+  finalCount: number;
+  top20: {
+    id: string;
+    title: string;
+    score: number;
+    parts: Record<string, number>;
+    source: string;
+  }[];
+}
+
+export let lastFeedDiagnostics: FeedDiagnostics | null = null;
+const diagListeners = new Set<(d: FeedDiagnostics) => void>();
+
+export function subscribeFeedDiagnostics(fn: (d: FeedDiagnostics) => void): () => void {
+  diagListeners.add(fn);
+  return () => {
+    diagListeners.delete(fn);
+  };
+}
+
+function updateFeedDiagnostics(diag: FeedDiagnostics) {
+  lastFeedDiagnostics = diag;
+  diagListeners.forEach((fn) => {
+    try {
+      fn(diag);
+    } catch {
+      /* ignore */
+    }
+  });
+}
 
 export interface FeedResult {
   videos: PipedVideo[];
@@ -85,7 +137,19 @@ async function generateCandidates(
   subs: Subscription[],
   history: HistoryRow[],
   likedIds: string[],
-): Promise<{ pool: Map<string, Candidate>; relatedIds: Set<string>; next: unknown | null }> {
+  searches: string[] = [],
+): Promise<{
+  pool: Map<string, Candidate>;
+  relatedIds: Set<string>;
+  next: unknown | null;
+  stats: {
+    sub: { ok: number; fail: number };
+    related: { ok: number; fail: number };
+    interest: { ok: number; fail: number };
+    trending: { ok: number; fail: number };
+  };
+  errors: string[];
+}> {
   const pool = new Map<string, Candidate>();
   const relatedIds = new Set<string>();
 
@@ -95,22 +159,68 @@ async function generateCandidates(
         (profile.channels.get(b.channel_id) ?? 0) - (profile.channels.get(a.channel_id) ?? 0),
     )
     .filter((s) => !profile.muted.has(s.channel_id))
-    .slice(0, 25);
+    .slice(0, 40);
 
-  const seeds = [
-    ...history
-      .filter((h) => (h.progress || 0) > 0 && (h.duration || 0) > 0)
-      .filter((h) => (h.progress as number) / (h.duration as number) > 0.45)
-      .slice(0, 6)
-      .map((h) => h.video_id),
-    ...likedIds.slice(0, 4),
-  ];
+  const localProgMap = getLocalProgress();
+  const sortedHistory = [...history].sort((a, b) => {
+    const timeA = a.watched_at ? new Date(a.watched_at).getTime() : 0;
+    const timeB = b.watched_at ? new Date(b.watched_at).getTime() : 0;
 
-  const queries = profile.topInterests.slice(0, 4);
+    const durA = a.duration || 0;
+    const progA = localProgMap[a.video_id] ?? (a.progress || 0);
+    const ratioA = durA > 0 ? progA / durA : 0;
+
+    const durB = b.duration || 0;
+    const progB = localProgMap[b.video_id] ?? (b.progress || 0);
+    const ratioB = durB > 0 ? progB / durB : 0;
+
+    const prefA = ratioA >= 0.4 ? 1 : 0;
+    const prefB = ratioB >= 0.4 ? 1 : 0;
+    if (prefA !== prefB) return prefB - prefA;
+    return timeB - timeA;
+  });
+
+  const historySeeds: string[] = [];
+  const seenSeeds = new Set<string>();
+  for (const h of sortedHistory) {
+    if (h.video_id && !seenSeeds.has(h.video_id)) {
+      seenSeeds.add(h.video_id);
+      historySeeds.push(h.video_id);
+      if (historySeeds.length >= 10) break;
+    }
+  }
+
+  const seeds = [...new Set([...historySeeds, ...likedIds.slice(0, 5)])];
+
+  const rawSearches: string[] =
+    searches.length > 0
+      ? searches
+      : JSON.parse(
+          (typeof localStorage !== "undefined" && localStorage.getItem("yt.searches")) || "[]",
+        );
+
+  const searchQueries: string[] = [];
+  const seenQ = new Set<string>();
+
+  for (const s of rawSearches) {
+    const q = typeof s === "string" ? s.trim() : "";
+    if (q && !seenQ.has(q.toLowerCase())) {
+      seenQ.add(q.toLowerCase());
+      searchQueries.push(q);
+      if (searchQueries.length >= 3) break;
+    }
+  }
+
+  const bestBigram = profile.topInterests.find((t) => t.includes(" "));
+  if (bestBigram && !seenQ.has(bestBigram.toLowerCase())) {
+    searchQueries.push(bestBigram);
+  }
+
+  const queries = searchQueries;
 
   const res = await homeCandidates({
     channelIds: rankedSubs.map((s) => s.channel_id),
-    seedVideoIds: [...new Set(seeds)],
+    seedVideoIds: seeds,
     queries,
   });
 
@@ -118,9 +228,22 @@ async function generateCandidates(
   res.related.forEach((v) => addCandidate(pool, v, "related"));
   res.relatedIds.forEach((id) => relatedIds.add(id));
   res.interest.forEach((v) => addCandidate(pool, v, "interest"));
-  res.trending.forEach((v) => addCandidate(pool, v, "trending"));
 
-  return { pool, relatedIds, next: res.trendingNext };
+  const trendingCandidates = profile.signalCount >= 15 ? res.trending.slice(0, 20) : res.trending;
+  trendingCandidates.forEach((v) => addCandidate(pool, v, "trending"));
+
+  return {
+    pool,
+    relatedIds,
+    next: res.trendingNext,
+    stats: res.stats || {
+      sub: { ok: 0, fail: 0 },
+      related: { ok: 0, fail: 0 },
+      interest: { ok: 0, fail: 0 },
+      trending: { ok: 0, fail: 0 },
+    },
+    errors: res.errors || [],
+  };
 }
 
 function rank(
@@ -167,6 +290,33 @@ function rank(
   return out.sort((a, b) => b.score - a.score);
 }
 
+function getSessionSeed(): number {
+  try {
+    const key = "yt.sessionSeed";
+    const seedStr = sessionStorage.getItem(key);
+    if (!seedStr) {
+      const newSeed = Math.floor(Math.random() * 0x7fffffff) + 1;
+      sessionStorage.setItem(key, String(newSeed));
+      return newSeed;
+    }
+    const n = parseInt(seedStr, 10);
+    return Number.isFinite(n) && n > 0 ? n : 123456789;
+  } catch {
+    return 123456789;
+  }
+}
+
+function createSeededRandom(initialSeed: number) {
+  let s = initialSeed;
+  return function next(): number {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function diversify(scored: ScoredItem[], pool: Map<string, Candidate>, size: number): ScoredItem[] {
   const picked: ScoredItem[] = [];
   const perChannel = new Map<string, number>();
@@ -192,14 +342,17 @@ function diversify(scored: ScoredItem[], pool: Map<string, Candidate>, size: num
     picked.push(item);
   }
 
+  const rng = createSeededRandom(getSessionSeed());
   const tail = scored.slice(rankedSlots, rankedSlots + 120).concat(skipped);
   for (let i = 0; i < exploreSlots && tail.length > 0; i++) {
-    const idx = Math.floor(Math.random() * tail.length);
+    const idx = Math.floor(rng() * tail.length);
     const [item] = tail.splice(idx, 1);
     const ch = channelOf(item.id);
     if ((perChannel.get(ch) || 0) >= MAX_PER_CHANNEL_TOTAL) continue;
     perChannel.set(ch, (perChannel.get(ch) || 0) + 1);
-    picked.splice(Math.floor(Math.random() * (picked.length - 5)) + 5, 0, item);
+    const maxInsert = Math.max(1, picked.length - 5);
+    const insertPos = Math.floor(rng() * maxInsert) + 5;
+    picked.splice(Math.min(insertPos, picked.length), 0, item);
   }
 
   return picked.slice(0, size);
@@ -220,11 +373,23 @@ export async function buildHomeFeed(
   likedIds: string[] = [],
   options: BuildFeedOptions = {},
 ): Promise<FeedResult> {
+  const buildStart = Date.now();
   const { progress = {}, searches = [], dismissed = getDismissed(), size = FEED_SIZE } = options;
 
   const profile = buildTasteProfile({ history, progress, likedIds, subs, searches, dismissed });
   lastProfile = profile;
   lastWatched = new Set(profile.watched);
+
+  const signalCount = profile.signalCount;
+  const topChannels = [...profile.channels.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  console.info("[feed] profile", {
+    signalCount,
+    muted: profile.muted.size,
+    topChannels,
+    topInterests: profile.topInterests,
+  });
+
   const coldStart = profile.signalCount < 5;
 
   if (coldStart) {
@@ -233,20 +398,46 @@ export async function buildHomeFeed(
     page.items.forEach((v) => addCandidate(pool, v, "trending"));
     await Promise.allSettled(
       subs.slice(0, 10).map(async (s) => {
-        const ch = await getChannel(s.channel_id);
-        (ch.relatedStreams || []).slice(0, 5).forEach((v) => addCandidate(pool, v, "sub"));
+        const vids = await channelFeed(s.channel_id);
+        (vids || []).slice(0, 5).forEach((v) => addCandidate(pool, v, "sub"));
       }),
     );
     const all = [...pool.values()].map((c) => c.video);
+    const videos = all.slice(0, size);
+
+    updateFeedDiagnostics({
+      builtAt: Date.now(),
+      buildMs: Date.now() - buildStart,
+      stats: {
+        sub: { ok: subs.length ? 1 : 0, fail: 0 },
+        related: { ok: 0, fail: 0 },
+        interest: { ok: 0, fail: 0 },
+        trending: { ok: page.items.length ? 1 : 0, fail: 0 },
+      },
+      errors: [],
+      signalCount: profile.signalCount,
+      coldStart: true,
+      mutedCount: profile.muted.size,
+      poolSize: pool.size,
+      finalCount: videos.length,
+      top20: [],
+    });
+
     return {
-      videos: all.slice(0, size),
+      videos,
       reserve: all.slice(size),
       coldStart: true,
       next: page.next,
     };
   }
 
-  const { pool, relatedIds, next } = await generateCandidates(profile, subs, history, likedIds);
+  const { pool, relatedIds, next, stats, errors } = await generateCandidates(
+    profile,
+    subs,
+    history,
+    likedIds,
+    searches,
+  );
   const scored = rank(pool, profile, relatedIds);
 
   const finalItems = diversify(scored, pool, size * 4);
@@ -268,6 +459,25 @@ export async function buildHomeFeed(
       }
     }
   }
+
+  updateFeedDiagnostics({
+    builtAt: Date.now(),
+    buildMs: Date.now() - buildStart,
+    stats,
+    errors,
+    signalCount: profile.signalCount,
+    coldStart: false,
+    mutedCount: profile.muted.size,
+    poolSize: pool.size,
+    finalCount: videos.length,
+    top20: (finalItems || []).slice(0, 20).map((item) => ({
+      id: item.id,
+      title: item.title,
+      score: item.score,
+      parts: item.parts,
+      source: item.source,
+    })),
+  });
 
   return { videos, reserve, coldStart: false, next, debug: finalItems };
 }
@@ -362,16 +572,26 @@ export function rankIncoming(items: PipedVideo[]): PipedVideo[] {
 export async function buildSubscriptionsFeed(subs: Subscription[]): Promise<PipedVideo[]> {
   if (subs.length === 0) return [];
   const pool = new Map<string, PipedVideo>();
+  const targetSubs = subs.slice(0, 40);
 
-  await Promise.allSettled(
-    subs.slice(0, 30).map(async (s) => {
-      const ch = await getChannel(s.channel_id);
-      (ch.relatedStreams || []).forEach((v) => {
-        const id = videoIdFromUrl(v.url);
-        if (id && !pool.has(id)) pool.set(id, v);
-      });
-    }),
-  );
+  const limit = 6;
+  let index = 0;
+  async function worker() {
+    while (index < targetSubs.length) {
+      const s = targetSubs[index++];
+      try {
+        const vids = await channelFeed(s.channel_id);
+        (vids || []).forEach((v) => {
+          const id = videoIdFromUrl(v.url);
+          if (id && !pool.has(id)) pool.set(id, v);
+        });
+      } catch {
+        // ignore errors for single channel feed
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, targetSubs.length) }, () => worker()));
 
   return [...pool.values()].sort(
     (a, b) => ageDays(a.uploaded, a.uploadedDate) - ageDays(b.uploaded, b.uploadedDate),

@@ -922,13 +922,18 @@ export async function videoDetails(videoId: string): Promise<StreamData> {
       ? await fetchComments(commentToken, 30)
       : { items: [], totalCount: 0 };
 
+    const category =
+      text(collect(next, "playerMicroformatRenderer")[0]?.category) ||
+      text(collect(next, "microformatDataRenderer")[0]?.category) ||
+      "";
+
     return {
       title,
       description:
         text(collect(secondary, "attributedDescription")[0]) || text(secondary.description),
       uploadDate,
       relativeDate,
-      category: "",
+      category,
       likes,
       views: parseCount(text(collect(primary, "videoViewCountRenderer")[0]?.viewCount)),
       uploader: text(owner.title),
@@ -1069,6 +1074,111 @@ export async function channel(input: string): Promise<ChannelData> {
       nextVideos: continuationToken(rawVideos.length > 0 ? data : homeData),
       nextShorts: continuationToken(shortsData),
     };
+  });
+}
+
+function decodeXml(s: string): string {
+  const unCdata = s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  return unCdata
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .trim();
+}
+
+/** Lightweight RSS feed for channel videos. Falls back to channel() on failure or 0 items. */
+export async function channelFeed(channelId: string): Promise<PipedVideo[]> {
+  const raw = channelId.trim();
+  const key = `channelfeed:${raw}`;
+
+  return cached(key, 15 * 60 * 1000, async () => {
+    let cleanId = raw.startsWith("UC") ? raw : "";
+    if (!cleanId) {
+      cleanId = raw.replace(/^\/?(c\/|user\/|channel\/)?@?/, "");
+    }
+
+    const fallbackToChannel = async (): Promise<PipedVideo[]> => {
+      const ch = await channel(raw);
+      return ch.relatedStreams || [];
+    };
+
+    try {
+      const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(cleanId)}`;
+      const res = await fetch(url, {
+        headers: {
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        },
+      });
+
+      if (!res.ok) {
+        return await fallbackToChannel();
+      }
+
+      const xml = await res.text();
+      const entries = xml.match(/<entry[\s\S]*?<\/entry>/gi);
+      if (!entries || entries.length === 0) {
+        return await fallbackToChannel();
+      }
+
+      const feedAuthorMatch = xml.match(/<feed[\s\S]*?<author>[\s\S]*?<name>([\s\S]*?)<\/name>/i);
+      const feedAuthorName = feedAuthorMatch ? decodeXml(feedAuthorMatch[1]) : "";
+
+      const feedChannelIdMatch = xml.match(/<yt:channelId>([^<]+)<\/yt:channelId>/i);
+      const resolvedChannelId = feedChannelIdMatch ? feedChannelIdMatch[1].trim() : cleanId;
+
+      const videos: PipedVideo[] = [];
+
+      for (const entry of entries) {
+        const idMatch = entry.match(/<yt:videoId>([^<]+)<\/yt:videoId>/i);
+        const videoId = idMatch ? idMatch[1].trim() : "";
+        if (!videoId) continue;
+
+        const titleMatch = entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const title = titleMatch ? decodeXml(titleMatch[1]) : "";
+
+        const pubMatch = entry.match(/<published>([^<]+)<\/published>/i);
+        const pubStr = pubMatch ? pubMatch[1].trim() : "";
+        const uploaded = pubStr ? new Date(pubStr).getTime() : Date.now();
+
+        const authorMatch = entry.match(
+          /<author>[\s\S]*?<name>([\s\S]*?)<\/name>[\s\S]*?<\/author>/i,
+        );
+        const uploaderName = authorMatch ? decodeXml(authorMatch[1]) : feedAuthorName;
+
+        const viewsMatch =
+          entry.match(/<media:statistics[^>]+views="(\d+)"/i) || entry.match(/views="(\d+)"/i);
+        const views = viewsMatch ? parseInt(viewsMatch[1], 10) : undefined;
+
+        const linkMatch = entry.match(/<link[^>]+href="([^"]+)"/i);
+        const href = linkMatch ? linkMatch[1] : "";
+        const isShort = href.includes("/shorts/") || /\/shorts\//i.test(entry);
+
+        videos.push({
+          url: `/watch?v=${videoId}`,
+          title,
+          thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          uploaderName,
+          uploaderUrl: `/channel/${resolvedChannelId}`,
+          uploaded: Number.isNaN(uploaded) ? Date.now() : uploaded,
+          duration: 0,
+          views,
+          isShort,
+        });
+      }
+
+      if (videos.length === 0) {
+        return await fallbackToChannel();
+      }
+
+      return videos;
+    } catch {
+      return await fallbackToChannel();
+    }
   });
 }
 

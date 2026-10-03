@@ -383,3 +383,260 @@ export async function saveImportedSubscriptions(subs: Subscription[]): Promise<S
   }
   return saved;
 }
+
+export interface ImportedHistoryItem {
+  v: string; // videoId
+  c: string; // channelId
+  t: string; // title
+  ts: number; // timestamp in ms
+}
+
+/**
+ * Parses Google Takeout watch-history.json
+ */
+export function parseYouTubeWatchHistoryJson(jsonContent: string): ImportedHistoryItem[] {
+  try {
+    const rawData = JSON.parse(jsonContent);
+    const items = Array.isArray(rawData)
+      ? rawData
+      : Array.isArray(rawData?.items)
+        ? rawData.items
+        : [];
+    const results: ImportedHistoryItem[] = [];
+
+    for (const item of items) {
+      if (!item || !item.titleUrl) continue;
+
+      // Ignore ads
+      if (
+        Array.isArray(item.details) &&
+        item.details.some((d: { name?: string }) => /ads/i.test(d?.name || ""))
+      ) {
+        continue;
+      }
+
+      // Ignore YouTube Music
+      if (item.header && /youtube music/i.test(String(item.header))) {
+        continue;
+      }
+
+      // Extract videoId
+      let videoId = "";
+      try {
+        const urlObj = new URL(item.titleUrl);
+        videoId = urlObj.searchParams.get("v") || "";
+      } catch {
+        const m = String(item.titleUrl).match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+        if (m) videoId = m[1];
+      }
+      if (!videoId) continue;
+
+      // Clean title: remove "Watched " or "شاهدت "
+      let title = String(item.title || "");
+      title = title.replace(/^(watched\s+|شاهدت\s+)/i, "").trim();
+
+      // Extract channelId from subtitles[0].url
+      let channelId = "";
+      if (Array.isArray(item.subtitles) && item.subtitles.length > 0) {
+        const subUrl = String(item.subtitles[0]?.url || "");
+        const chMatch = subUrl.match(/channel\/(UC[a-zA-Z0-9_-]{22})/);
+        if (chMatch) {
+          channelId = chMatch[1];
+        } else {
+          const after = subUrl.split("/channel/")[1];
+          if (after) channelId = after.split("/")[0].split("?")[0];
+        }
+      }
+
+      const ts = item.time ? new Date(item.time).getTime() : Date.now();
+
+      results.push({
+        v: videoId,
+        c: channelId,
+        t: title,
+        ts: Number.isNaN(ts) ? Date.now() : ts,
+      });
+    }
+
+    // Sort by ts descending (most recent first)
+    results.sort((a, b) => b.ts - a.ts);
+
+    // Deduplicate by videoId (keeping newest)
+    const seen = new Set<string>();
+    const deduplicated: ImportedHistoryItem[] = [];
+    for (const item of results) {
+      if (!seen.has(item.v)) {
+        seen.add(item.v);
+        deduplicated.push(item);
+      }
+    }
+
+    return deduplicated;
+  } catch (err) {
+    console.warn("Failed to parse watch-history.json:", err);
+    return [];
+  }
+}
+
+/**
+ * Parses Google Takeout search-history.json
+ */
+export function parseYouTubeSearchHistoryJson(jsonContent: string): string[] {
+  try {
+    const rawData = JSON.parse(jsonContent);
+    const items = Array.isArray(rawData)
+      ? rawData
+      : Array.isArray(rawData?.items)
+        ? rawData.items
+        : [];
+
+    const parsed: { query: string; ts: number }[] = [];
+
+    for (const item of items) {
+      if (!item || !item.title) continue;
+
+      const q = String(item.title)
+        .replace(/^(searched for\s+|بحثت عن\s+)/i, "")
+        .trim();
+      if (!q) continue;
+
+      const ts = item.time ? new Date(item.time).getTime() : 0;
+      parsed.push({ query: q, ts: Number.isNaN(ts) ? 0 : ts });
+    }
+
+    // Sort by time descending
+    parsed.sort((a, b) => b.ts - a.ts);
+
+    // Deduplicate taking up to 100 latest unique queries
+    const seen = new Set<string>();
+    const queries: string[] = [];
+    for (const p of parsed) {
+      const lower = p.query.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        queries.push(p.query);
+        if (queries.length >= 100) break;
+      }
+    }
+
+    return queries;
+  } catch (err) {
+    console.warn("Failed to parse search-history.json:", err);
+    return [];
+  }
+}
+
+/**
+ * Saves imported watch history into localStorage "yt.importedHistory" (compressed, up to 2000 items)
+ */
+export function saveImportedHistory(items: ImportedHistoryItem[]): number {
+  if (!items.length) return 0;
+  try {
+    let existing: ImportedHistoryItem[] = [];
+    const raw = localStorage.getItem("yt.importedHistory");
+    if (raw) {
+      existing = JSON.parse(raw);
+    }
+
+    // Merge items with existing, keeping unique videoId and newest ts
+    const map = new Map<string, ImportedHistoryItem>();
+    for (const it of existing) {
+      if (it.v) map.set(it.v, it);
+    }
+    for (const it of items) {
+      if (it.v) {
+        const prev = map.get(it.v);
+        if (!prev || it.ts > prev.ts) {
+          map.set(it.v, it);
+        }
+      }
+    }
+
+    const merged = [...map.values()].sort((a, b) => b.ts - a.ts).slice(0, 2000);
+    localStorage.setItem("yt.importedHistory", JSON.stringify(merged));
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("yt:imported-history-updated"));
+    }
+    return merged.length;
+  } catch (err) {
+    console.warn("Failed to save imported history:", err);
+    return 0;
+  }
+}
+
+/**
+ * Saves imported search queries into localStorage "yt.searches" (prepends up to 100 unique queries)
+ */
+export function saveImportedSearches(queries: string[]): number {
+  if (!queries.length) return 0;
+  try {
+    let existing: string[] = [];
+    const raw = localStorage.getItem("yt.searches");
+    if (raw) {
+      existing = JSON.parse(raw);
+    }
+
+    const seen = new Set<string>();
+    const combined: string[] = [];
+
+    // Prepend new distinct queries first
+    for (const q of queries) {
+      const lower = q.trim().toLowerCase();
+      if (lower && !seen.has(lower)) {
+        seen.add(lower);
+        combined.push(q.trim());
+      }
+    }
+
+    // Then existing searches
+    for (const q of existing) {
+      const lower = q.trim().toLowerCase();
+      if (lower && !seen.has(lower)) {
+        seen.add(lower);
+        combined.push(q.trim());
+      }
+    }
+
+    const finalSearches = combined.slice(0, 200);
+    localStorage.setItem("yt.searches", JSON.stringify(finalSearches));
+    return queries.length;
+  } catch (err) {
+    console.warn("Failed to save imported searches:", err);
+    return 0;
+  }
+}
+
+export function getImportedHistoryCount(): number {
+  try {
+    const raw = localStorage.getItem("yt.importedHistory");
+    if (!raw) return 0;
+    const items = JSON.parse(raw);
+    return Array.isArray(items) ? items.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function getImportedSearchesCount(): number {
+  try {
+    const raw = localStorage.getItem("yt.searches");
+    if (!raw) return 0;
+    const items = JSON.parse(raw);
+    return Array.isArray(items) ? items.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function clearImportedData(): void {
+  try {
+    localStorage.removeItem("yt.importedHistory");
+    localStorage.removeItem("yt.searches");
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("yt:imported-history-updated"));
+    }
+  } catch (err) {
+    console.warn("Failed to clear imported data:", err);
+  }
+}

@@ -120,9 +120,10 @@ export function tokenize(text: string, withBigrams = true): string[] {
   return out;
 }
 
-export function timeDecay(isoDate?: string): number {
+export function timeDecay(isoDate?: string | number): number {
   if (!isoDate) return 0.3;
-  const ms = Date.now() - new Date(isoDate).getTime();
+  const time = typeof isoDate === "number" ? isoDate : new Date(isoDate).getTime();
+  const ms = Date.now() - time;
   if (!Number.isFinite(ms) || ms < 0) return 1;
   const days = ms / 86_400_000;
   return Math.pow(0.5, days / HALF_LIFE_DAYS);
@@ -154,8 +155,8 @@ function engagement(row: HistoryRow, watchedSeconds: number): number {
   if (dur <= 0) return watchedSeconds > 60 ? 0.5 : 0.15;
 
   const ratio = Math.min(1, watchedSeconds / dur);
-  if (ratio < 0.08) return -1;
-  if (ratio < 0.2) return -0.4;
+  if (ratio < 0.08) return -0.5;
+  if (ratio < 0.2) return -0.2;
   if (ratio < 0.45) return 0.25;
   if (ratio < 0.75) return 0.7;
   return 1;
@@ -188,15 +189,15 @@ export function buildTasteProfile(input: BuildProfileInput): TasteProfile {
   for (const row of history) {
     watched.add(row.video_id);
 
-    const seconds = progress[row.video_id] ?? 0;
+    const seconds: number | undefined = progress[row.video_id] ?? row.progress;
     const decay = timeDecay(row.watched_at);
-    let eng = engagement(row, seconds);
+    let eng = seconds === undefined ? 0.2 : engagement(row, seconds);
     if (liked.has(row.video_id)) eng = Math.min(1.6, eng + 0.6);
 
     const weight = eng * decay;
     signalCount++;
 
-    if (row.duration && seconds > 0) {
+    if (seconds !== undefined && row.duration && seconds > 0) {
       const ratio = Math.min(1, seconds / row.duration);
       completionSum += ratio;
       completionCount++;
@@ -210,13 +211,48 @@ export function buildTasteProfile(input: BuildProfileInput): TasteProfile {
     const chId = row.channel_id || "";
     if (chId) {
       bump(channels, chId, weight);
-      if (eng < 0) bump(channelNegatives, chId, decay);
+      if (seconds !== undefined && eng < 0) bump(channelNegatives, chId, decay);
     }
 
     if (row.title) {
       for (const t of tokenize(row.title)) bump(rawTopics, t, weight);
     }
-    if (row.category) bump(rawTopics, normalizeText(row.category), weight * 1.5);
+  }
+
+  // Imported watch history from Google Takeout (weak positive signals, max 1.0 per channel)
+  let importedHistory: { v: string; c: string; t: string; ts: number }[] = [];
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem("yt.importedHistory");
+      if (raw) importedHistory = JSON.parse(raw);
+    }
+  } catch {
+    // Ignore invalid JSON
+  }
+
+  const importedChannelWeights = new Map<string, number>();
+
+  for (const item of importedHistory) {
+    if (item.v) watched.add(item.v);
+
+    const decay = timeDecay(item.ts);
+    const weight = 0.3 * decay;
+
+    if (item.c) {
+      const current = importedChannelWeights.get(item.c) || 0;
+      const next = Math.min(1.0, current + weight);
+      importedChannelWeights.set(item.c, next);
+    }
+
+    if (item.t) {
+      for (const t of tokenize(item.t)) bump(rawTopics, t, weight);
+    }
+
+    signalCount++;
+  }
+
+  for (const [chId, w] of importedChannelWeights) {
+    bump(channels, chId, w);
   }
 
   for (const s of subs) bump(channels, s.channel_id, 1.2);

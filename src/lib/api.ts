@@ -9,6 +9,7 @@
 import { pushDebug } from "./debug";
 import {
   channelFn,
+  channelFeedFn,
   searchPageFn,
   playlistFn,
   searchVideosFn,
@@ -122,6 +123,18 @@ export function getChannel(channelId: string): Promise<ChannelData> {
     p = run(`قناة · ${channelId}`, () => channelFn({ data: { id: channelId } }));
     channelCache.set(channelId, p);
     p.catch(() => channelCache.delete(channelId));
+  }
+  return p;
+}
+
+const channelFeedCache = new Map<string, Promise<PipedVideo[]>>();
+
+export function channelFeed(channelId: string): Promise<PipedVideo[]> {
+  let p = channelFeedCache.get(channelId);
+  if (!p) {
+    p = run(`فيد القناة · ${channelId}`, () => channelFeedFn({ data: { id: channelId } }));
+    channelFeedCache.set(channelId, p);
+    p.catch(() => channelFeedCache.delete(channelId));
   }
   return p;
 }

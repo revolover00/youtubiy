@@ -66,6 +66,13 @@ export const channelFn = createServerFn({ method: "POST" })
     return channel(data.id);
   });
 
+export const channelFeedFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => z.object({ id: z.string().min(1) }).parse(data))
+  .handler(async ({ data }): Promise<PipedVideo[]> => {
+    const { channelFeed } = await import("./youtube.server");
+    return channelFeed(data.id);
+  });
+
 export const browsePageFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ continuation: z.string().min(1) }).parse(data))
   .handler(async ({ data }): Promise<Page> => {
@@ -104,9 +111,20 @@ export const homeCandidatesFn = createServerFn({ method: "POST" })
       interest: PipedVideo[];
       trending: PipedVideo[];
       trendingNext: unknown;
+      stats: {
+        sub: { ok: number; fail: number };
+        related: { ok: number; fail: number };
+        interest: { ok: number; fail: number };
+        trending: { ok: number; fail: number };
+      };
+      errors: string[];
+      ms: number;
     }> => {
-      const { channel, videoDetails, searchPage, trendingPage } = await import("./youtube.server");
+      const { channelFeed, videoDetails, searchPage, trendingPage } =
+        await import("./youtube.server");
       const { videoIdFromUrl } = await import("./format");
+
+      const startMs = Date.now();
 
       async function runInBatches<T, R>(
         items: T[],
@@ -150,7 +168,7 @@ export const homeCandidatesFn = createServerFn({ method: "POST" })
           if (task.type === "trending") {
             return trendingPage();
           } else if (task.type === "channel") {
-            return channel(task.id);
+            return channelFeed(task.id);
           } else if (task.type === "seed") {
             return videoDetails(task.id);
           } else {
@@ -167,20 +185,51 @@ export const homeCandidatesFn = createServerFn({ method: "POST" })
       let trending: PipedVideo[] = [];
       let trendingNext: unknown = null;
 
+      const stats = {
+        sub: { ok: 0, fail: 0 },
+        related: { ok: 0, fail: 0 },
+        interest: { ok: 0, fail: 0 },
+        trending: { ok: 0, fail: 0 },
+      };
+      const rawErrors: string[] = [];
+
       tasks.forEach((task, idx) => {
         const res = taskResults[idx];
-        if (res.status !== "fulfilled") return;
+        const statKey =
+          task.type === "trending"
+            ? "trending"
+            : task.type === "channel"
+              ? "sub"
+              : task.type === "seed"
+                ? "related"
+                : "interest";
+
+        if (res.status !== "fulfilled") {
+          stats[statKey].fail++;
+          const reason = res.reason;
+          const msg = (
+            reason instanceof Error
+              ? reason.message
+              : typeof reason === "string"
+                ? reason
+                : JSON.stringify(reason) || "Error"
+          ).slice(0, 120);
+          rawErrors.push(msg);
+          return;
+        }
+
+        stats[statKey].ok++;
 
         if (task.type === "trending") {
           const tp = res.value as TrendingPage;
           trending = tp.items || [];
           trendingNext = tp.cursors || null;
         } else if (task.type === "channel") {
-          const ch = res.value as ChannelData;
-          (ch.relatedStreams || []).slice(0, 8).forEach((v) => subs.push(v));
+          const vids = res.value as PipedVideo[];
+          (vids || []).slice(0, 8).forEach((v) => subs.push(v));
         } else if (task.type === "seed") {
           const st = res.value as StreamData;
-          (st.relatedStreams || []).slice(0, 15).forEach((v) => {
+          (st.relatedStreams || []).slice(0, 20).forEach((v) => {
             related.push(v);
             const vidId = videoIdFromUrl(v.url);
             if (vidId) relatedIdsSet.add(vidId);
@@ -198,6 +247,9 @@ export const homeCandidatesFn = createServerFn({ method: "POST" })
         interest,
         trending,
         trendingNext,
+        stats,
+        errors: rawErrors.slice(0, 5),
+        ms: Date.now() - startMs,
       };
     },
   );

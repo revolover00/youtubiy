@@ -27,7 +27,7 @@ service cloud.firestore {
         data.userId is string && data.userId.size() <= 128 &&
         data.email is string && data.email.size() <= 256 &&
         (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
-        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 2048)) &&
         data.createdAt is string && data.createdAt.size() <= 64 &&
         data.updatedAt is string && data.updatedAt.size() <= 64;
     }
@@ -36,7 +36,7 @@ service cloud.firestore {
       return data.channelId == channelId &&
         data.channelId is string && data.channelId.size() <= 128 &&
         data.channelTitle is string && data.channelTitle.size() <= 256 &&
-        (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 1024)) &&
+        (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 2048)) &&
         (!('subscriberCount' in data) || (data.subscriberCount is string && data.subscriberCount.size() <= 64)) &&
         data.addedAt is string && data.addedAt.size() <= 64;
     }
@@ -46,7 +46,7 @@ service cloud.firestore {
         data.videoId is string && data.videoId.size() <= 128 &&
         data.title is string && data.title.size() <= 512 &&
         (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
-        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 2048)) &&
         (!('duration' in data) || data.duration is number) &&
         (!('progress' in data) || data.progress is number) &&
         data.watchedAt is string && data.watchedAt.size() <= 64;
@@ -57,7 +57,7 @@ service cloud.firestore {
         data.videoId is string && data.videoId.size() <= 128 &&
         data.title is string && data.title.size() <= 512 &&
         (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
-        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 2048)) &&
         (!('duration' in data) || data.duration is number) &&
         data.addedAt is string && data.addedAt.size() <= 64;
     }
@@ -67,7 +67,7 @@ service cloud.firestore {
         data.videoId is string && data.videoId.size() <= 128 &&
         data.title is string && data.title.size() <= 512 &&
         (!('channelTitle' in data) || (data.channelTitle is string && data.channelTitle.size() <= 256)) &&
-        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 2048)) &&
         (!('duration' in data) || data.duration is number) &&
         data.addedAt is string && data.addedAt.size() <= 64;
     }
@@ -75,7 +75,7 @@ service cloud.firestore {
     function isValidNotification(data) {
       return data.video_id is string && data.video_id.size() <= 128 &&
         data.title is string && data.title.size() <= 512 &&
-        data.thumbnail is string && data.thumbnail.size() <= 1024 &&
+        data.thumbnail is string && data.thumbnail.size() <= 2048 &&
         data.channel_id is string && data.channel_id.size() <= 128 &&
         data.channel_name is string && data.channel_name.size() <= 256 &&
         data.created_at is string && data.created_at.size() <= 64 &&
@@ -86,7 +86,7 @@ service cloud.firestore {
       return data.title is string && data.title.size() <= 256 &&
         (!('description' in data) || (data.description is string && data.description.size() <= 1024)) &&
         data.videoIds is list &&
-        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 1024)) &&
+        (!('thumbnail' in data) || (data.thumbnail is string && data.thumbnail.size() <= 2048)) &&
         data.createdAt is string && data.createdAt.size() <= 64 &&
         data.updatedAt is string && data.updatedAt.size() <= 64;
     }

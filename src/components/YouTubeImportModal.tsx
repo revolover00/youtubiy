@@ -9,6 +9,9 @@ import {
   Youtube,
   RefreshCw,
   ListPlus,
+  History,
+  Search,
+  Trash2,
 } from "lucide-react";
 import { useLanguage } from "../lib/i18n";
 import { useAuth } from "../lib/AuthContext";
@@ -18,6 +21,13 @@ import {
   parseYouTubeSubscriptionsJson,
   parseYouTubeChannelsText,
   saveImportedSubscriptions,
+  parseYouTubeWatchHistoryJson,
+  parseYouTubeSearchHistoryJson,
+  saveImportedHistory,
+  saveImportedSearches,
+  getImportedHistoryCount,
+  getImportedSearchesCount,
+  clearImportedData,
 } from "../lib/youtubeApi";
 import type { Subscription } from "../lib/types";
 
@@ -35,7 +45,13 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
   const [dragOver, setDragOver] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileSuccess, setFileSuccess] = useState<number | null>(null);
+  const [successSummary, setSuccessSummary] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const [importedHistoryCount, setImportedHistoryCount] = useState(() => getImportedHistoryCount());
+  const [importedSearchesCount, setImportedSearchesCount] = useState(() =>
+    getImportedSearchesCount(),
+  );
 
   const [pastedText, setPastedText] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -46,87 +62,157 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
 
   if (!isOpen) return null;
 
-  const handleProcessText = async (text: string, filename = "") => {
+  const handleClearImportedData = () => {
+    clearImportedData();
+    setImportedHistoryCount(0);
+    setImportedSearchesCount(0);
+    setSuccessSummary(
+      isAr
+        ? "تم مسح سجل المشاهدات والبحثات المستوردة بنجاح."
+        : "Imported watch and search history cleared.",
+    );
+  };
+
+  const handleFiles = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
     setIsProcessing(true);
     setFileError(null);
     setFileSuccess(null);
-    try {
-      let subs: Subscription[] = [];
-      const trimmed = text.trim();
+    setSuccessSummary(null);
 
-      if (filename.endsWith(".json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
-        subs = parseYouTubeSubscriptionsJson(trimmed);
-      } else if (
-        filename.endsWith(".csv") ||
-        trimmed.toLowerCase().includes("channel id") ||
-        trimmed.toLowerCase().includes("channel url")
-      ) {
-        subs = parseYouTubeSubscriptionsCsv(trimmed);
-      } else {
-        subs = parseYouTubeSubscriptionsCsv(trimmed);
-        if (subs.length === 0) {
-          subs = parseYouTubeChannelsText(trimmed);
+    let totalSubs = 0;
+    let totalWatch = 0;
+    let totalSearch = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const text = await file.text();
+        const fname = file.name.toLowerCase();
+        const trimmed = text.trim();
+
+        // 1. Check if watch-history.json
+        if (
+          fname.includes("watch-history") ||
+          (trimmed.startsWith("[") &&
+            (trimmed.includes('"titleUrl"') ||
+              trimmed.includes("watch?v=") ||
+              trimmed.includes('"Watched ') ||
+              trimmed.includes('"شاهدت ')))
+        ) {
+          const items = parseYouTubeWatchHistoryJson(trimmed);
+          if (items.length > 0) {
+            const savedCount = saveImportedHistory(items);
+            totalWatch += savedCount;
+          } else {
+            errors.push(
+              isAr
+                ? `لم يتم العثور على فيديوهات صالحة في ${file.name}`
+                : `No valid videos found in ${file.name}`,
+            );
+          }
+          continue;
         }
-      }
 
-      if (subs.length === 0) {
-        setFileError(
-          isAr
-            ? "لم يتم العثور على أي قنوات في هذا الملف. تأكد من أن الملف هو subscriptions.csv من Google Takeout أو ملف JSON لقنواتك."
-            : "No YouTube channels found in this file. Please make sure it is subscriptions.csv from Google Takeout or valid JSON.",
+        // 2. Check if search-history.json
+        if (
+          fname.includes("search-history") ||
+          (trimmed.startsWith("[") &&
+            (trimmed.includes('"Searched for ') || trimmed.includes('"بحثت عن ')))
+        ) {
+          const queries = parseYouTubeSearchHistoryJson(trimmed);
+          if (queries.length > 0) {
+            const savedCount = saveImportedSearches(queries);
+            totalSearch += savedCount;
+          } else {
+            errors.push(
+              isAr
+                ? `لم يتم العثور على عمليات بحث صالحة في ${file.name}`
+                : `No valid search queries found in ${file.name}`,
+            );
+          }
+          continue;
+        }
+
+        // 3. Subscriptions (CSV or JSON)
+        let subs: Subscription[] = [];
+        if (fname.endsWith(".json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          subs = parseYouTubeSubscriptionsJson(trimmed);
+        } else {
+          subs = parseYouTubeSubscriptionsCsv(trimmed);
+          if (subs.length === 0) {
+            subs = parseYouTubeChannelsText(trimmed);
+          }
+        }
+
+        if (subs.length > 0) {
+          await saveImportedSubscriptions(subs);
+          totalSubs += subs.length;
+        } else {
+          errors.push(
+            isAr
+              ? `تعذر استخراج بيانات من الملف ${file.name}`
+              : `Could not parse data from ${file.name}`,
+          );
+        }
+      } catch (err) {
+        console.warn(`Error reading file ${file.name}:`, err);
+        errors.push(
+          isAr ? `خطأ أثناء قراءة الملف ${file.name}` : `Error reading file ${file.name}`,
         );
-        return;
       }
+    }
 
-      await saveImportedSubscriptions(subs);
-      setFileSuccess(subs.length);
-      onImportSuccess?.(subs.length);
+    setImportedHistoryCount(getImportedHistoryCount());
+    setImportedSearchesCount(getImportedSearchesCount());
+
+    if (totalSubs > 0 || totalWatch > 0 || totalSearch > 0) {
+      const parts: string[] = [];
+      if (totalSubs > 0) parts.push(isAr ? `${totalSubs} قناة` : `${totalSubs} channels`);
+      if (totalWatch > 0)
+        parts.push(isAr ? `${totalWatch} مشاهدة` : `${totalWatch} watch history items`);
+      if (totalSearch > 0)
+        parts.push(isAr ? `${totalSearch} استعلام بحث` : `${totalSearch} search queries`);
+
+      const summary = isAr
+        ? `تم بنجاح استيراد: ${parts.join("، و ")}!`
+        : `Successfully imported: ${parts.join(", and ")}!`;
+
+      setSuccessSummary(summary);
+      if (totalSubs > 0) {
+        setFileSuccess(totalSubs);
+        onImportSuccess?.(totalSubs);
+      }
       setTimeout(() => {
         onClose();
-      }, 1800);
-    } catch (err: unknown) {
-      console.warn("Error processing subscriptions:", err);
+      }, 2200);
+    } else if (errors.length > 0) {
+      setFileError(errors.join(" | "));
+    } else {
       setFileError(
         isAr
-          ? "حدث خطأ أثناء معالجة الملف. يرجى التحقق من الصيغة وإعادة المحاولة."
-          : "Error parsing the file. Please check the format and try again.",
+          ? "لم يتم العثور على بيانات صالحة في الملفات المحددة."
+          : "No valid data found in selected files.",
       );
-    } finally {
-      setIsProcessing(false);
     }
+
+    setIsProcessing(false);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        handleProcessText(content, file.name.toLowerCase());
-      }
-    };
-    reader.onerror = () => {
-      setFileError(isAr ? "تعذر قراءة الملف." : "Failed to read file.");
-    };
-    reader.readAsText(file);
-    // Reset file input value so user can pick same file again if desired
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+    }
     e.target.value = "";
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        handleProcessText(content, file.name.toLowerCase());
-      }
-    };
-    reader.readAsText(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
   };
 
   const handlePasteSubmit = async (e: React.FormEvent) => {
@@ -290,19 +376,49 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
 
         {/* Content */}
         <div className="p-6 overflow-y-auto space-y-4">
-          {fileSuccess !== null && (
+          {/* Imported History & Searches Stats Bar */}
+          <div className="p-3 bg-yt-surface rounded-xl border border-yt-border flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-4 text-yt-sub">
+              <div className="flex items-center gap-1.5">
+                <History className="w-4 h-4 text-sky-400" />
+                <span>{isAr ? "المشاهدات المستوردة:" : "Imported Views:"}</span>
+                <span className="font-semibold text-yt-text">{importedHistoryCount}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Search className="w-4 h-4 text-amber-400" />
+                <span>{isAr ? "البحثات المستوردة:" : "Imported Searches:"}</span>
+                <span className="font-semibold text-yt-text">{importedSearchesCount}</span>
+              </div>
+            </div>
+            {(importedHistoryCount > 0 || importedSearchesCount > 0) && (
+              <button
+                type="button"
+                onClick={handleClearImportedData}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[11px] font-medium transition-colors"
+                title={
+                  isAr ? "مسح المشاهدات والبحثات المستوردة" : "Clear imported history & searches"
+                }
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isAr ? "مسح البيانات المستوردة" : "Clear Imported"}</span>
+              </button>
+            )}
+          </div>
+
+          {(successSummary || fileSuccess !== null) && (
             <div className="flex items-center gap-3 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs animate-in zoom-in-95">
               <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
               <div>
                 <p className="font-semibold text-sm">
-                  {isAr
-                    ? `تم بنجاح استيراد ${fileSuccess} قناة إلى اشتراكاتك!`
-                    : `Successfully imported ${fileSuccess} channels!`}
+                  {successSummary ||
+                    (isAr
+                      ? `تم بنجاح استيراد ${fileSuccess} قناة إلى اشتراكاتك!`
+                      : `Successfully imported ${fileSuccess} channels!`)}
                 </p>
                 <p className="text-[11px] text-emerald-300/80">
                   {isAr
-                    ? "تم تحديث خلاصتك الشخصية وقائمة الاشتراكات."
-                    : "Your feed and subscriptions have been refreshed."}
+                    ? "تم تحديث خلاصتك الشخصية وقائمة الاشتراكات وبروفايل الذوق."
+                    : "Your feed, subscriptions, and taste profile have been updated."}
                 </p>
               </div>
             </div>
@@ -317,9 +433,7 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
                       1
                     </span>
                     <span>
-                      {isAr
-                        ? "تصدير الاشتراكات من Google Takeout:"
-                        : "Export subscriptions from Google Takeout:"}
+                      {isAr ? "ملفات Google Takeout المدعومة:" : "Supported Google Takeout files:"}
                     </span>
                   </div>
                   <a
@@ -334,8 +448,8 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
                 </div>
                 <p className="text-yt-sub text-[11px] leading-relaxed">
                   {isAr
-                    ? "اختر يوتيوب فقط > الاشتراكات (Subscriptions) > ثم نزّل الملف وافتح المجلد المضغوط للحصول على ملف subscriptions.csv."
-                    : "Select only YouTube > Subscriptions > create export. Unzip the downloaded file to get subscriptions.csv."}
+                    ? "يمكنك رفع ملف subscriptions.csv (الاشتراكات)، أو watch-history.json (سجل المشاهدة)، أو search-history.json (سجل البحث)، أو اختيار أكثر من ملف معاً لبناء بروفايل ذوق فوري!"
+                    : "You can upload subscriptions.csv, watch-history.json, or search-history.json, or select multiple files together to build your taste profile instantly!"}
                 </p>
               </div>
 
@@ -357,6 +471,7 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept=".csv,.json,.txt"
                   onChange={handleFileChange}
                   className="hidden"
@@ -368,16 +483,16 @@ export function YouTubeImportModal({ isOpen, onClose, onImportSuccess }: Props) 
                   <p className="text-sm font-semibold text-yt-text">
                     {isProcessing
                       ? isAr
-                        ? "جاري معالجة وحفظ القنوات..."
-                        : "Processing & saving channels..."
+                        ? "جاري معالجة وحفظ الملفات..."
+                        : "Processing & saving files..."
                       : isAr
-                        ? "اسحب وأفلت ملف subscriptions.csv هنا"
-                        : "Drag & drop your subscriptions.csv here"}
+                        ? "اسحب وأفلت ملفات Takeout هنا"
+                        : "Drag & drop your Takeout files here"}
                   </p>
                   <p className="text-xs text-yt-sub mt-1">
                     {isAr
-                      ? "أو انقر لاختيار الملف من جهازك (.csv, .json)"
-                      : "or click to browse from device (.csv, .json)"}
+                      ? "اختر subscriptions.csv و watch-history.json و search-history.json"
+                      : "Select subscriptions.csv, watch-history.json, or search-history.json"}
                   </p>
                 </div>
               </div>

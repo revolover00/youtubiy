@@ -309,7 +309,9 @@ export default function Watch({
       const next = !prev;
       try {
         localStorage.setItem("yt.theater", String(next));
-      } catch {}
+      } catch {
+        /* storage unavailable */
+      }
       return next;
     });
   }, []);
@@ -705,7 +707,8 @@ export default function Watch({
         if (document.fullscreenElement) {
           void document.exitFullscreen();
         } else {
-          const playerSlot = document.querySelector("#persistent-player") || playerContainerRef.current;
+          const playerSlot =
+            document.querySelector("#persistent-player") || playerContainerRef.current;
           if (playerSlot) {
             void playerSlot.requestFullscreen();
           }
@@ -817,7 +820,10 @@ export default function Watch({
         theater ? "lg:max-w-none lg:px-4" : "lg:flex-row"
       }`}
     >
-      <KeyboardShortcutsModal open={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+      <KeyboardShortcutsModal
+        open={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
+      />
 
       <div className={`flex-1 min-w-0 ${theater ? "lg:px-0" : ""}`}>
         {/* Native player slot */}
@@ -1255,7 +1261,9 @@ export default function Watch({
           ))}
         </div>
 
-        <div className={`space-y-3 ${theater ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3" : ""}`}>
+        <div
+          className={`space-y-3 ${theater ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3" : ""}`}
+        >
           {related.map((r, i) => (
             <VideoCard
               key={r.url}

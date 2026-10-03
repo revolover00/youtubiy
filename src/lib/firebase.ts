@@ -1,5 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, type User } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithCredential,
+  signInWithPopup,
+  signOut,
+  type User,
+} from "firebase/auth";
 import { doc, getDocFromServer, getFirestore } from "firebase/firestore";
 import { requestGoogleAccessToken, fetchGoogleUserProfile, type GoogleUserProfile } from "./gsi";
 
@@ -138,6 +145,24 @@ export async function loginWithGoogle(): Promise<{
     const token = await requestGoogleAccessToken(false);
     if (token) {
       cachedAccessToken = token;
+      // Synchronize with Firebase Auth so Firestore rules allow writes
+      try {
+        const cred = GoogleAuthProvider.credential(null, token);
+        const res = await signInWithCredential(auth, cred);
+        if (res.user) {
+          const u = {
+            uid: res.user.uid,
+            email: res.user.email,
+            displayName: res.user.displayName,
+            photoURL: res.user.photoURL,
+          };
+          cachedGoogleUser = u;
+          return { user: u, accessToken: token };
+        }
+      } catch (authErr) {
+        console.warn("Direct Firebase signInWithCredential note:", authErr);
+      }
+
       const profile = await fetchGoogleUserProfile(token);
       cachedGoogleUser = profile;
       return { user: profile, accessToken: token };
@@ -177,6 +202,14 @@ export async function requestYouTubeAccessToken(): Promise<string | null> {
     const token = await requestGoogleAccessToken(true);
     if (token) {
       cachedAccessToken = token;
+      if (!auth.currentUser) {
+        try {
+          const cred = GoogleAuthProvider.credential(null, token);
+          await signInWithCredential(auth, cred);
+        } catch {
+          // Ignore
+        }
+      }
       return token;
     }
   } catch (gsiError) {
