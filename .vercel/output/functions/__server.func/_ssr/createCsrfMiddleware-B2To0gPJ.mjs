@@ -1,4 +1,4 @@
-//#region node_modules/.nitro/vite/services/ssr/assets/createCsrfMiddleware-f-2zZAGW.js
+//#region node_modules/.nitro/vite/services/ssr/assets/createCsrfMiddleware-B2To0gPJ.js
 var createMiddleware = (options, __opts) => {
 	const resolvedOptions = {
 		type: "request",
@@ -25,16 +25,13 @@ var createMiddleware = (options, __opts) => {
 		}
 	};
 };
-var csrfSymbol = Symbol.for("tanstack-start:csrf-middleware");
 var innerCreateCsrfMiddleware = (opts = {}) => {
-	const middleware = createMiddleware().server(async (ctx) => {
+	return createMiddleware().server(async (ctx) => {
 		const csrfCtx = ctx;
 		if (opts.filter && !await opts.filter(csrfCtx)) return ctx.next();
 		if (await isCsrfRequestAllowed(opts, csrfCtx)) return ctx.next();
 		return getFailureResponse(opts, csrfCtx);
 	});
-	Object.defineProperty(middleware, csrfSymbol, { value: true });
-	return middleware;
 };
 var createCsrfMiddleware = innerCreateCsrfMiddleware;
 async function isCsrfRequestAllowed(opts, ctx) {
@@ -82,4 +79,4 @@ async function getFailureResponse(opts, ctx) {
 	return opts.failureResponse?.clone() ?? new Response("Forbidden", { status: 403 });
 }
 //#endregion
-export { createMiddleware as n, csrfSymbol as r, createCsrfMiddleware as t };
+export { createMiddleware as n, createCsrfMiddleware as t };

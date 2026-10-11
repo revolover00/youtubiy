@@ -1,4 +1,4 @@
-//#region node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-CUqQCRjq.js
+//#region node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-C3I5hqmJ.js
 var tsrStartManifest = () => ({ routes: {
 	__root__: {
 		filePath: "/app/applet/src/routes/__root.tsx",
@@ -13,11 +13,11 @@ var tsrStartManifest = () => ({ routes: {
 			"/subscriptions",
 			"/watch"
 		],
-		preloads: ["/assets/index-BfbZDpnz.js"],
+		preloads: ["/assets/index-CSekxfCs.js"],
 		scripts: [{ attrs: {
 			type: "module",
 			async: !0,
-			src: "/assets/index-BfbZDpnz.js"
+			src: "/assets/index-CSekxfCs.js"
 		} }]
 	},
 	"/": {

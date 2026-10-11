@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 3000",
-    "build": "vite build",
-    "vercel-build": "NITRO_PRESET=vercel vite build",
+    "build": "NODE_ENV=production NITRO_PRESET=vercel vite build",
+    "vercel-build": "NODE_ENV=production NITRO_PRESET=vercel vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",

@@ -10286,7 +10286,7 @@ var __vite_optional_peer_dep_bufferutil_ws_exports = /* @__PURE__ */ __exportAll
 var __vite_optional_peer_dep_bufferutil_ws_default;
 var init___vite_optional_peer_dep_bufferutil_ws = __esmMin((() => {
 	__vite_optional_peer_dep_bufferutil_ws_default = {};
-	throw new Error(`Could not resolve "bufferutil" imported by "ws".`);
+	throw new Error(`Could not resolve "bufferutil" imported by "ws". Is it installed?`);
 }));
 //#endregion
 //#region node_modules/ws/lib/buffer-util.js
@@ -10778,7 +10778,7 @@ var __vite_optional_peer_dep_utf_8_validate_ws_exports = /* @__PURE__ */ __expor
 var __vite_optional_peer_dep_utf_8_validate_ws_default;
 var init___vite_optional_peer_dep_utf_8_validate_ws = __esmMin((() => {
 	__vite_optional_peer_dep_utf_8_validate_ws_default = {};
-	throw new Error(`Could not resolve "utf-8-validate" imported by "ws".`);
+	throw new Error(`Could not resolve "utf-8-validate" imported by "ws". Is it installed?`);
 }));
 //#endregion
 //#region node_modules/ws/lib/validation.js

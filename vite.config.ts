@@ -34,6 +34,9 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    esbuild: {
+      jsxDev: false,
+    },
     plugins: [
       {
         name: "ensure-pwa-outdir",
