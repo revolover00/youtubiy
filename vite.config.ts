@@ -23,11 +23,10 @@ const nitroPreset = process.env.NITRO_PRESET || (isVercel ? "vercel" : undefined
 const pwaOutDir = isVercel ? ".vercel/output/static" : ".output/public";
 
 export default defineConfig({
-  nitro: nitroPreset
-    ? {
-        preset: nitroPreset,
-      }
-    : undefined,
+  nitro: {
+    ...(nitroPreset ? { preset: nitroPreset } : {}),
+    inlineDynamicImports: true,
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
