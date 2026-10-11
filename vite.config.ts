@@ -26,6 +26,9 @@ export default defineConfig({
   nitro: {
     ...(nitroPreset ? { preset: nitroPreset } : {}),
     inlineDynamicImports: true,
+    vercel: {
+      entryFormat: "node",
+    },
   },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).

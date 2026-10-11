@@ -17,7 +17,7 @@ import { isIP } from "node:net";
 import * as path$1 from "path";
 import * as fs$2 from "fs/promises";
 import { writeFile } from "fs/promises";
-import { finished } from "node:stream/promises";
+import { finished, pipeline as pipeline$1 } from "node:stream/promises";
 import { __assign, __rest, __spreadArray } from "tslib";
 //#region \0rolldown/runtime.js
 var __create = Object.create;
@@ -18577,14 +18577,14 @@ async function consumeBody(data) {
 	}
 	else throw new FetchError(`Premature close of server response while trying to fetch ${data.url}`);
 }
-var pipeline$1, INTERNALS$2, Body, clone, getNonSpecFormDataBoundary, extractContentType, getTotalBytes, writeToStream;
+var pipeline$2, INTERNALS$2, Body, clone, getNonSpecFormDataBoundary, extractContentType, getTotalBytes, writeToStream;
 var init_body = __esmMin((() => {
 	init_fetch_blob();
 	init_esm_min();
 	init_fetch_error();
 	init_base();
 	init_is();
-	pipeline$1 = promisify(Stream.pipeline);
+	pipeline$2 = promisify(Stream.pipeline);
 	INTERNALS$2 = Symbol("Body internals");
 	Body = class {
 		constructor(body, { size = 0 } = {}) {
@@ -18723,7 +18723,7 @@ var init_body = __esmMin((() => {
 	};
 	writeToStream = async (dest, { body }) => {
 		if (body === null) dest.end();
-		else await pipeline$1(body, dest);
+		else await pipeline$2(body, dest);
 	};
 }));
 //#endregion
@@ -66469,10 +66469,481 @@ var init__url$1 = __esmMin((() => {
 	})();
 }));
 //#endregion
+//#region node_modules/srvx/dist/_chunks/_trust-proxy.mjs
+function isTrustedProxy(trustProxy, remoteAddress) {
+	if (trustProxy === void 0 || trustProxy === false) return false;
+	if (trustProxy === true) return true;
+	if (trustProxy === "loopback") return isLoopbackAddress(remoteAddress);
+	if (remoteAddress === void 0) return false;
+	if (trustProxy.includes(remoteAddress)) return true;
+	const mapped = ipv4FromMapped(remoteAddress);
+	return mapped !== void 0 && trustProxy.includes(mapped);
+}
+function ipv4FromMapped(address) {
+	return address.startsWith("::ffff:") && address.includes(".") ? address.slice(7) : void 0;
+}
+function isLoopbackAddress(address) {
+	return !!address && (address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127."));
+}
+function firstForwardedValue(value) {
+	if (!value) return;
+	return (Array.isArray(value) ? value[0] : value).split(",")[0].trim() || void 0;
+}
+var HOST_RE;
+var init__trust_proxy = __esmMin((() => {
+	HOST_RE = /^(\[(?:[A-Fa-f0-9:.]+)\]|(?:[A-Za-z0-9_-]+\.)*[A-Za-z0-9_-]+|(?:\d{1,3}\.){3}\d{1,3})(:\d{1,5})?$/;
+}));
+//#endregion
+//#region node_modules/srvx/dist/_chunks/_body-limit.mjs
+function createBodyTooLargeError(maxRequestBodySize) {
+	return Object.assign(/* @__PURE__ */ new Error(`Request body exceeds the maximum allowed size of ${maxRequestBodySize} bytes.`), {
+		code: "ERR_BODY_TOO_LARGE",
+		statusCode: 413,
+		status: 413
+	});
+}
+function limitBodyStream(stream, maxRequestBodySize) {
+	const reader = stream.getReader();
+	let size = 0;
+	return new ReadableStream({
+		async pull(controller) {
+			const { done, value } = await reader.read();
+			if (done) {
+				controller.close();
+				return;
+			}
+			size += value.byteLength;
+			if (size > maxRequestBodySize) {
+				const error = createBodyTooLargeError(maxRequestBodySize);
+				reader.cancel(error).catch(() => {});
+				controller.error(error);
+				return;
+			}
+			controller.enqueue(value);
+		},
+		cancel(reason) {
+			return reader.cancel(reason);
+		}
+	});
+}
+var init__body_limit = __esmMin((() => {}));
+//#endregion
 //#region node_modules/srvx/dist/adapters/node.mjs
-var NodeResponse$1;
+function sendNodeResponse(nodeRes, webRes) {
+	try {
+		return _sendNodeResponse(nodeRes, webRes, false) || Promise.resolve();
+	} catch (error) {
+		return Promise.reject(error);
+	}
+}
+function _sendNodeResponse(nodeRes, webRes, detached) {
+	if (!webRes) {
+		nodeRes.statusCode = 500;
+		return endNodeResponse(nodeRes, detached);
+	}
+	if (webRes._toNodeResponse) {
+		const res = webRes._toNodeResponse();
+		if (res.body) {
+			if (res.body instanceof ReadableStream) {
+				writeHead(nodeRes, res.status, res.statusText, res.headers);
+				return streamBody(res.body, nodeRes);
+			} else if (typeof res.body?.pipe === "function") return pipeBody(res.body, nodeRes, res.status, res.statusText, res.headers);
+			writeHead(nodeRes, res.status, res.statusText, res.headers);
+			nodeRes.write(res.body);
+		} else writeHead(nodeRes, res.status, res.statusText, res.headers);
+		return endNodeResponse(nodeRes, detached);
+	}
+	const rawHeaders = [];
+	for (const [key, value] of webRes.headers) rawHeaders.push(key, value);
+	writeHead(nodeRes, webRes.status, webRes.statusText, rawHeaders);
+	return webRes.body ? streamBody(webRes.body, nodeRes) : endNodeResponse(nodeRes, detached);
+}
+function writeHead(nodeRes, status, statusText, rawHeaders) {
+	if (!nodeRes.headersSent) if (nodeRes.req?.httpVersion === "2.0") nodeRes.writeHead(status, rawHeaders);
+	else nodeRes.writeHead(status, statusText, rawHeaders);
+}
+function endNodeResponse(nodeRes, detached) {
+	if (detached) {
+		nodeRes.end();
+		return;
+	}
+	return new Promise((resolve) => nodeRes.end(resolve));
+}
+function pipeBody(stream, nodeRes, status, statusText, headers) {
+	if (nodeRes.destroyed) {
+		stream.destroy?.();
+		return;
+	}
+	if (typeof stream.on !== "function" || typeof stream.destroy !== "function") {
+		writeHead(nodeRes, status, statusText, headers);
+		stream.pipe(nodeRes);
+		return new Promise((resolve) => nodeRes.on("close", resolve));
+	}
+	if (stream.destroyed) {
+		writeHead(nodeRes, 500, "Internal Server Error", []);
+		return endNodeResponse(nodeRes);
+	}
+	return new Promise((resolve) => {
+		function onEarlyError() {
+			stream.off("readable", onReadable);
+			stream.destroy();
+			writeHead(nodeRes, 500, "Internal Server Error", []);
+			endNodeResponse(nodeRes).then(resolve);
+		}
+		function onReadable() {
+			stream.off("error", onEarlyError);
+			if (nodeRes.destroyed) {
+				stream.destroy();
+				return resolve();
+			}
+			writeHead(nodeRes, status, statusText, headers);
+			pipeline$1(stream, nodeRes).catch(() => {}).then(() => resolve());
+		}
+		stream.once("error", onEarlyError);
+		stream.once("readable", onReadable);
+	});
+}
+function streamBody(stream, nodeRes) {
+	if (nodeRes.destroyed) {
+		stream.cancel();
+		return;
+	}
+	const reader = stream.getReader();
+	function streamCancel(error) {
+		reader.cancel(error).catch(() => {});
+		if (error) nodeRes.destroy(error);
+	}
+	function streamHandle({ done, value }) {
+		try {
+			if (done) nodeRes.end();
+			else if (nodeRes.write(value)) reader.read().then(streamHandle, streamCancel);
+			else nodeRes.once("drain", () => reader.read().then(streamHandle, streamCancel));
+		} catch (error) {
+			streamCancel(error instanceof Error ? error : void 0);
+		}
+	}
+	nodeRes.on("close", streamCancel);
+	nodeRes.on("error", streamCancel);
+	reader.read().then(streamHandle, streamCancel);
+	return reader.closed.catch(streamCancel).finally(() => {
+		nodeRes.off("close", streamCancel);
+		nodeRes.off("error", streamCancel);
+	});
+}
+function _isRepeated(rawHeaders, lowerName) {
+	let seen = false;
+	for (let i = 0; i < rawHeaders.length; i += 2) {
+		const key = rawHeaders[i];
+		if (key.length === lowerName.length && key.toLowerCase() === lowerName) {
+			if (seen) return true;
+			seen = true;
+		}
+	}
+	return false;
+}
+function readBody(req, maxRequestBodySize) {
+	if ("rawBody" in req && Buffer.isBuffer(req.rawBody)) {
+		if (maxRequestBodySize !== void 0 && req.rawBody.length > maxRequestBodySize) return Promise.reject(createBodyTooLargeError(maxRequestBodySize));
+		return Promise.resolve(req.rawBody);
+	}
+	return new Promise((resolve, reject) => {
+		const chunks = [];
+		let size = 0;
+		const cleanup = () => {
+			req.off("data", onData);
+			req.off("end", onEnd);
+			req.off("error", onError);
+		};
+		const onData = (chunk) => {
+			if (maxRequestBodySize !== void 0) {
+				size += chunk.length;
+				if (size > maxRequestBodySize) {
+					cleanup();
+					req.pause?.();
+					reject(createBodyTooLargeError(maxRequestBodySize));
+					return;
+				}
+			}
+			chunks.push(chunk);
+		};
+		const onError = (err) => {
+			cleanup();
+			reject(err);
+		};
+		const onEnd = () => {
+			cleanup();
+			resolve(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks));
+		};
+		req.on("data", onData).once("end", onEnd).once("error", onError);
+	});
+}
+function getNativeRequest() {
+	let R = globalThis[kNativeRequest] || globalThis.Request;
+	while (R?._srvx) R = Object.getPrototypeOf(R);
+	return globalThis[kNativeRequest] ??= R;
+}
+function toNodeHandler(handler, options) {
+	if (handler.__nodeHandler) return handler.__nodeHandler;
+	function convertedNodeHandler(nodeReq, nodeRes) {
+		const res = handler(new NodeRequest({
+			req: nodeReq,
+			res: nodeRes,
+			maxRequestBodySize: options?.maxRequestBodySize,
+			trustProxy: options?.trustProxy
+		}));
+		return res instanceof Promise ? res.then((resolvedRes) => sendNodeResponse(nodeRes, resolvedRes)) : sendNodeResponse(nodeRes, res);
+	}
+	convertedNodeHandler.__fetchHandler = handler;
+	assignFnName(convertedNodeHandler, handler, " (converted to Node handler)");
+	return convertedNodeHandler;
+}
+function assignFnName(target, source, suffix) {
+	if (source.name) try {
+		Object.defineProperty(target, "name", { value: `${source.name}${suffix}` });
+	} catch {}
+}
+var NodeRequestURL, _nonJoinedHeaders, _validHeaderNameRE, NodeRequestHeaders, kNativeRequest, NodeRequest, NodeResponse$1;
 var init_node$3 = __esmMin((() => {
 	init__url$1();
+	init__trust_proxy();
+	init__body_limit();
+	NodeRequestURL = class extends FastURL$1 {
+		constructor({ req, trusted = false }) {
+			const path = req.url || "/";
+			const forwardedHost = trusted ? firstForwardedValue(req.headers["x-forwarded-host"]) : void 0;
+			let host = (forwardedHost && HOST_RE.test(forwardedHost) ? forwardedHost : void 0) || req.headers.host || req.headers[":authority"];
+			if (host && !HOST_RE.test(host)) host = "_invalid_";
+			else if (!host) if (req.socket) host = `${req.socket.localFamily === "IPv6" ? "[" + req.socket.localAddress + "]" : req.socket.localAddress}:${req.socket?.localPort || "80"}`;
+			else host = "localhost";
+			const forwardedProto = trusted ? firstForwardedValue(req.headers["x-forwarded-proto"]) : void 0;
+			const protocol = req.socket?.encrypted || forwardedProto === "https" || trusted && req.headers[":scheme"] === "https" ? "https:" : "http:";
+			if (path[0] === "/") {
+				const qIndex = path.indexOf("?");
+				super({
+					protocol,
+					host,
+					pathname: qIndex === -1 ? path : path.slice(0, qIndex) || "/",
+					search: qIndex === -1 ? "" : path.slice(qIndex) || ""
+				});
+			} else if (path === "*") super({
+				protocol,
+				host,
+				pathname: "/*",
+				search: ""
+			});
+			else super(path);
+		}
+	};
+	_nonJoinedHeaders = /* @__PURE__ */ new Set([
+		"age",
+		"authorization",
+		"content-length",
+		"content-type",
+		"etag",
+		"expires",
+		"from",
+		"host",
+		"if-modified-since",
+		"if-unmodified-since",
+		"last-modified",
+		"location",
+		"max-forwards",
+		"proxy-authorization",
+		"referer",
+		"retry-after",
+		"server",
+		"user-agent"
+	]);
+	_validHeaderNameRE = /^[!#$%&'*+\-.^_`|~\dA-Za-z]+$/;
+	NodeRequestHeaders = /* @__PURE__ */ (() => {
+		const NativeHeaders = globalThis.Headers;
+		class Headers {
+			#req;
+			#headers;
+			constructor(req) {
+				this.#req = req;
+			}
+			static [Symbol.hasInstance](val) {
+				return val instanceof NativeHeaders;
+			}
+			get _headers() {
+				if (!this.#headers) {
+					const headers = new NativeHeaders();
+					const rawHeaders = this.#req.rawHeaders;
+					const len = rawHeaders.length;
+					for (let i = 0; i < len; i += 2) {
+						const key = rawHeaders[i];
+						if (key.charCodeAt(0) === 58) continue;
+						const value = rawHeaders[i + 1];
+						headers.append(key, value);
+					}
+					this.#headers = headers;
+				}
+				return this.#headers;
+			}
+			get(name) {
+				if (this.#headers) return this.#headers.get(name);
+				const lower = name.toLowerCase();
+				if (lower.charCodeAt(0) === 58) return this._headers.get(name);
+				const value = this.#req.headers[lower];
+				if (typeof value === "string") return _nonJoinedHeaders.has(lower) && _isRepeated(this.#req.rawHeaders, lower) ? this._headers.get(name) : value;
+				if (Array.isArray(value)) return value.join(", ");
+				return lower !== "__proto__" && _validHeaderNameRE.test(name) ? null : this._headers.get(name);
+			}
+			has(name) {
+				if (this.#headers) return this.#headers.has(name);
+				const lower = name.toLowerCase();
+				if (lower.charCodeAt(0) === 58) return this._headers.has(name);
+				if (Object.hasOwn(this.#req.headers, lower)) return true;
+				return lower !== "__proto__" && _validHeaderNameRE.test(name) ? false : this._headers.has(name);
+			}
+			getSetCookie() {
+				if (this.#headers) return this.#headers.getSetCookie();
+				const value = this.#req.headers["set-cookie"];
+				return Array.isArray(value) ? value.slice() : value ? [value] : [];
+			}
+			entries() {
+				return this._headers.entries();
+			}
+			[Symbol.iterator]() {
+				return this.entries();
+			}
+		}
+		lazyInherit$1(Headers.prototype, NativeHeaders.prototype, "_headers");
+		Object.setPrototypeOf(Headers, NativeHeaders);
+		Object.setPrototypeOf(Headers.prototype, NativeHeaders.prototype);
+		return Headers;
+	})();
+	kNativeRequest = /* @__PURE__ */ Symbol.for("srvx.nativeRequest");
+	NodeRequest = /* @__PURE__ */ (() => {
+		const NativeRequest = getNativeRequest();
+		class Request {
+			runtime;
+			waitUntil;
+			#req;
+			#url;
+			#bodyStream;
+			#request;
+			#headers;
+			#abortController;
+			#maxRequestBodySize;
+			#trustProxy;
+			#ip;
+			#ipResolved = false;
+			#remoteAddress;
+			#trusted;
+			constructor(ctx) {
+				this.#req = ctx.req;
+				this.#maxRequestBodySize = ctx.maxRequestBodySize;
+				this.#trustProxy = ctx.trustProxy;
+				this.runtime = {
+					name: "node",
+					node: ctx
+				};
+			}
+			static [Symbol.hasInstance](val) {
+				return val instanceof NativeRequest;
+			}
+			#resolveTrusted() {
+				if (this.#trusted === void 0) {
+					this.#remoteAddress = this.#req.socket?.remoteAddress;
+					this.#trusted = isTrustedProxy(this.#trustProxy, this.#remoteAddress);
+				}
+				return this.#trusted;
+			}
+			get ip() {
+				if (this.#ipResolved) return this.#ip;
+				this.#ipResolved = true;
+				if (this.#resolveTrusted()) {
+					const forwarded = firstForwardedValue(this.#req.headers["x-forwarded-for"]);
+					if (forwarded) return this.#ip = forwarded;
+				}
+				return this.#ip = this.#remoteAddress;
+			}
+			get method() {
+				if (this.#request) return this.#request.method;
+				return this.#req.method || "GET";
+			}
+			get _url() {
+				return this.#url ||= new NodeRequestURL({
+					req: this.#req,
+					trusted: this.#resolveTrusted()
+				});
+			}
+			set _url(url) {
+				this.#url = url;
+			}
+			get url() {
+				if (this.#request) return this.#request.url;
+				return this._url.href;
+			}
+			get headers() {
+				if (this.#request) return this.#request.headers;
+				return this.#headers ||= new NodeRequestHeaders(this.#req);
+			}
+			get _abortController() {
+				if (!this.#abortController) {
+					this.#abortController = new AbortController();
+					const { req, res } = this.runtime.node;
+					const abortController = this.#abortController;
+					const abort = (err) => abortController.abort?.(err);
+					if (res) res.once("close", () => {
+						const reqError = req.errored;
+						if (reqError) abort(reqError);
+						else if (!res.writableEnded) abort();
+					});
+					else req.once("close", () => {
+						if (!req.complete) abort();
+					});
+				}
+				return this.#abortController;
+			}
+			get signal() {
+				return this.#request ? this.#request.signal : this._abortController.signal;
+			}
+			get body() {
+				if (this.#request) return this.#request.body;
+				if (this.#bodyStream === void 0) {
+					const method = this.method;
+					let stream = !(method === "GET" || method === "HEAD") ? Readable.toWeb(this.#req) : null;
+					if (stream && this.#maxRequestBodySize !== void 0) stream = limitBodyStream(stream, this.#maxRequestBodySize);
+					this.#bodyStream = stream;
+				}
+				return this.#bodyStream;
+			}
+			#readBuffered() {
+				return readBody(this.#req, this.#maxRequestBodySize);
+			}
+			text() {
+				if (this.#request) return this.#request.text();
+				if (this.#bodyStream !== void 0) return this.#bodyStream ? new Response(this.#bodyStream).text() : Promise.resolve("");
+				return this.#readBuffered().then((buf) => buf.toString());
+			}
+			json() {
+				if (this.#request) return this.#request.json();
+				if (this.#bodyStream !== void 0) return this.text().then((text) => JSON.parse(text));
+				return this.#readBuffered().then((buf) => JSON.parse(buf.toString()));
+			}
+			get _request() {
+				if (!this.#request) {
+					const body = this.body;
+					this.#request = new NativeRequest(this.url, {
+						method: this.method,
+						headers: this.headers,
+						signal: this._abortController.signal,
+						body,
+						duplex: body ? "half" : void 0
+					});
+					this.#headers = void 0;
+					this.#bodyStream = void 0;
+				}
+				return this.#request;
+			}
+		}
+		lazyInherit$1(Request.prototype, NativeRequest.prototype, "_request");
+		Object.setPrototypeOf(Request.prototype, NativeRequest.prototype);
+		return Request;
+	})();
 	NodeResponse$1 = /* @__PURE__ */ (() => {
 		const NativeResponse = globalThis.Response;
 		const STATUS_CODES = globalThis.process?.getBuiltinModule?.("node:http")?.STATUS_CODES || {};
@@ -153161,23 +153632,21 @@ function isrRouteRewrite(reqUrl, xNowRouteMatches) {
 	}
 }
 //#endregion
-//#region node_modules/nitro/dist/presets/vercel/runtime/vercel.web.mjs
-var nitroApp = useNitroApp();
-var vercel_web_default = { fetch(req, context) {
-	const isrURL = isrRouteRewrite(req.url, req.headers.get("x-now-route-matches"));
+//#region node_modules/nitro/dist/presets/vercel/runtime/vercel.node.mjs
+init_node$3();
+var handler = toNodeHandler(useNitroApp().fetch);
+function nodeHandler(req, res) {
+	let ip;
+	Object.defineProperty(req.socket, "remoteAddress", { get() {
+		const h = req.headers["x-forwarded-for"];
+		return ip ??= h?.split?.(",").shift()?.trim();
+	} });
+	const isrURL = isrRouteRewrite(req.url, req.headers["x-now-route-matches"]);
 	if (isrURL) {
 		const { routeRules } = getRouteRules("", isrURL[0]);
-		if (routeRules?.isr) req = new Request(new URL(isrURL[0] + (isrURL[1] ? `?${isrURL[1]}` : ""), req.url).href, req);
+		if (routeRules?.isr) req.url = isrURL[0] + (isrURL[1] ? `?${isrURL[1]}` : "");
 	}
-	req.runtime ??= { name: "vercel" };
-	req.runtime.vercel = { context };
-	let ip;
-	Object.defineProperty(req, "ip", { get() {
-		const h = req.headers.get("x-forwarded-for");
-		return ip ??= h?.split(",").shift()?.trim();
-	} });
-	req.waitUntil = context?.waitUntil;
-	return nitroApp.fetch(req);
-} };
+	return handler(req, res);
+}
 //#endregion
-export { vercel_web_default as default };
+export { nodeHandler as default };
