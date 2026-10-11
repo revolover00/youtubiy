@@ -10,12 +10,24 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { VitePWA } from "vite-plugin-pwa";
 
 const isVercel = Boolean(
-  process.env.VERCEL || process.env.NOW_BUILDER || process.env.NITRO_PRESET === "vercel",
+  process.env.VERCEL ||
+  process.env.VERCEL_ENV ||
+  process.env.NOW_BUILDER ||
+  process.env.NITRO_PRESET === "vercel" ||
+  (typeof process.cwd === "function" && process.cwd().startsWith("/vercel")) ||
+  (typeof process.env.PWD === "string" && process.env.PWD.startsWith("/vercel")),
 );
+
+const nitroPreset = process.env.NITRO_PRESET || (isVercel ? "vercel" : undefined);
 
 const pwaOutDir = isVercel ? ".vercel/output/static" : ".output/public";
 
 export default defineConfig({
+  nitro: nitroPreset
+    ? {
+        preset: nitroPreset,
+      }
+    : undefined,
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
