@@ -10,11 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ChannelRouteImport } from './routes/channel'
+import { Route as LibraryRouteImport } from './routes/library'
+import { Route as PlaylistRouteImport } from './routes/playlist'
+import { Route as PoliciesRouteImport } from './routes/policies'
+import { Route as SearchRouteImport } from './routes/search'
+import { Route as ShortsRouteImport } from './routes/shorts'
+import { Route as SubscriptionsRouteImport } from './routes/subscriptions'
 import { Route as WatchRouteImport } from './routes/watch'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChannelRoute = ChannelRouteImport.update({
+  id: '/channel',
+  path: '/channel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LibraryRoute = LibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaylistRoute = PlaylistRouteImport.update({
+  id: '/playlist',
+  path: '/playlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PoliciesRoute = PoliciesRouteImport.update({
+  id: '/policies',
+  path: '/policies',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShortsRoute = ShortsRouteImport.update({
+  id: '/shorts',
+  path: '/shorts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SubscriptionsRoute = SubscriptionsRouteImport.update({
+  id: '/subscriptions',
+  path: '/subscriptions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WatchRoute = WatchRouteImport.update({
@@ -25,27 +67,83 @@ const WatchRoute = WatchRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/channel': typeof ChannelRoute
+  '/library': typeof LibraryRoute
+  '/playlist': typeof PlaylistRoute
+  '/policies': typeof PoliciesRoute
+  '/search': typeof SearchRoute
+  '/shorts': typeof ShortsRoute
+  '/subscriptions': typeof SubscriptionsRoute
   '/watch': typeof WatchRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/channel': typeof ChannelRoute
+  '/library': typeof LibraryRoute
+  '/playlist': typeof PlaylistRoute
+  '/policies': typeof PoliciesRoute
+  '/search': typeof SearchRoute
+  '/shorts': typeof ShortsRoute
+  '/subscriptions': typeof SubscriptionsRoute
   '/watch': typeof WatchRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/channel': typeof ChannelRoute
+  '/library': typeof LibraryRoute
+  '/playlist': typeof PlaylistRoute
+  '/policies': typeof PoliciesRoute
+  '/search': typeof SearchRoute
+  '/shorts': typeof ShortsRoute
+  '/subscriptions': typeof SubscriptionsRoute
   '/watch': typeof WatchRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/watch'
+  fullPaths:
+    | '/'
+    | '/channel'
+    | '/library'
+    | '/playlist'
+    | '/policies'
+    | '/search'
+    | '/shorts'
+    | '/subscriptions'
+    | '/watch'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/watch'
-  id: '__root__' | '/' | '/watch'
+  to:
+    | '/'
+    | '/channel'
+    | '/library'
+    | '/playlist'
+    | '/policies'
+    | '/search'
+    | '/shorts'
+    | '/subscriptions'
+    | '/watch'
+  id:
+    | '__root__'
+    | '/'
+    | '/channel'
+    | '/library'
+    | '/playlist'
+    | '/policies'
+    | '/search'
+    | '/shorts'
+    | '/subscriptions'
+    | '/watch'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ChannelRoute: typeof ChannelRoute
+  LibraryRoute: typeof LibraryRoute
+  PlaylistRoute: typeof PlaylistRoute
+  PoliciesRoute: typeof PoliciesRoute
+  SearchRoute: typeof SearchRoute
+  ShortsRoute: typeof ShortsRoute
+  SubscriptionsRoute: typeof SubscriptionsRoute
   WatchRoute: typeof WatchRoute
 }
 
@@ -56,6 +154,55 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/channel': {
+      id: '/channel'
+      path: '/channel'
+      fullPath: '/channel'
+      preLoaderRoute: typeof ChannelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playlist': {
+      id: '/playlist'
+      path: '/playlist'
+      fullPath: '/playlist'
+      preLoaderRoute: typeof PlaylistRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/policies': {
+      id: '/policies'
+      path: '/policies'
+      fullPath: '/policies'
+      preLoaderRoute: typeof PoliciesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/shorts': {
+      id: '/shorts'
+      path: '/shorts'
+      fullPath: '/shorts'
+      preLoaderRoute: typeof ShortsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/subscriptions': {
+      id: '/subscriptions'
+      path: '/subscriptions'
+      fullPath: '/subscriptions'
+      preLoaderRoute: typeof SubscriptionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/watch': {
@@ -70,6 +217,13 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ChannelRoute: ChannelRoute,
+  LibraryRoute: LibraryRoute,
+  PlaylistRoute: PlaylistRoute,
+  PoliciesRoute: PoliciesRoute,
+  SearchRoute: SearchRoute,
+  ShortsRoute: ShortsRoute,
+  SubscriptionsRoute: SubscriptionsRoute,
   WatchRoute: WatchRoute,
 }
 export const routeTree = rootRouteImport
